@@ -1,8 +1,0 @@
-{
-  "appId": "uz.kadastr.route",
-  "appName": "Кадастр Маршрут",
-  "webDir": "www",
-  "server": {
-    "androidScheme": "https"
-  }
-}
