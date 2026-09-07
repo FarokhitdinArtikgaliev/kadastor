@@ -13,53 +13,55 @@ jobs:
 
     steps:
 
-      # 1. Скачать исходный код
+      # 1. Скачать проект
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Установить Node.js
+      # 2. Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # 3. Установить Java
-      # ВАЖНО: cache: gradle здесь НЕ используем,
-      # потому что Gradle Wrapper появится только после cap add android
+      # 3. Java
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      # 4. Установить Android SDK
+      # 4. Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # 5. Установить npm-зависимости
+      # 5. Установка зависимостей проекта
       - name: Install dependencies
         run: npm install
 
-      # 6. Проверить Capacitor
+      # 6. Установка TypeScript
+      - name: Install TypeScript
+        run: npm install --save-dev typescript
+
+      # 7. Проверка Capacitor
       - name: Check Capacitor
         run: npx cap --version
 
-      # 7. Создать Android проект
+      # 8. Создание Android проекта
       - name: Add Android platform
         run: npx cap add android
 
-      # 8. Синхронизировать web-приложение с Android
+      # 9. Синхронизация
       - name: Sync Capacitor
         run: npx cap sync android
 
-      # 9. Собрать APK
+      # 10. Сборка APK
       - name: Build Debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
-      # 10. Загрузить APK
+      # 11. Загрузка APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
