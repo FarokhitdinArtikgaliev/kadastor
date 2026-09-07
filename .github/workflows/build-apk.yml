@@ -3,22 +3,26 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      # 1. Получаем код проекта
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Устанавливаем Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
 
+      # 3. Устанавливаем Java для Android/Gradle
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -26,22 +30,30 @@ jobs:
           java-version: '21'
           cache: gradle
 
+      # 4. Устанавливаем Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install dependencies
+      # 5. Устанавливаем зависимости проекта
+      - name: Install npm dependencies
         run: npm install
 
-      - name: Create Android project
+      # 6. Создаём Android-проект Capacitor
+      - name: Add Android platform
         run: npx cap add android
 
+      # 7. Копируем web-приложение в Android
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Build debug APK
+      # 8. Собираем APK
+      - name: Build Debug APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
 
+      # 9. Загружаем готовый APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
