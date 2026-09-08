@@ -17,6 +17,7 @@ const routes = [
 ["Наманган","Наманган: восток",["Уйчи тумани","Чортоқ тумани","Янгиқўрғон тумани"],1651,214],
 ["Наманган","Наманган: дальний север",["Косонсой тумани","Учқўрғон тумани","Норин тумани"],1948,281]
 ].map(([region,title,stops,workload,km,note],i)=>({id:i+1,region,title,stops,workload,km,note}));
+const stopCoords = {"Андижон шаҳар":[40.7598055556,72.3589166667],"Хонобод шаҳар":[40.8019166667,72.9846666667],"Олтинкўл тумани":[40.7964722222,72.1648611111],"Андижон тумани":[40.8565277778,72.3088888889],"Балиқчи тумани":[40.9039444444,71.8457222222],"Бўстон тумани":[40.6897222222,71.9488055556],"Булоқбоши тумани":[40.6391111111,72.4958333333],"Жалақудуқ тумани":[40.7160833333,72.64375],"Избоскан тумани":[40.8970833333,72.2558888889],"Улуғнор тумани":[40.7561666667,71.7048333333],"Қўрғонтепа тумани":[40.7288055556,72.758],"Асака тумани":[40.6405833333,72.2477777778],"Марҳамат тумани":[40.5058055556,72.3438888889],"Шаҳрихон тумани":[40.7208333333,72.0372777778],"Пахтаобод тумани":[40.9358611111,72.5051388889],"Хўжаобод тумани":[40.6677777778,72.5654444444],"Наманган шаҳар":[41.0074805556,71.6675305556],"Мингбулоқ тумани":[40.8611583333,71.4582666667],"Косонсой тумани":[41.2571388889,71.5414166667],"Наманган тумани":[40.9234416667,71.5836777778],"Норин тумани":[40.9159222222,72.1189],"Поп тумани":[40.8693666667,71.11695],"Тўрақўрғон тумани":[41.0038638889,71.5094583333],"Уйчи тумани":[41.0308944444,71.8445444444],"Учқўрғон тумани":[41.1188833333,72.0744833333],"Чортоқ тумани":[41.0777222222,71.8151666667],"Чуст тумани":[40.9871388889,71.2310277778],"Янгиқўрғон тумани":[41.1915555556,71.7222777778],"Қувасой шаҳар":[40.2946388889,71.9883611111],"Қўқон шаҳар":[40.5348888889,70.9241111111],"Марғилон шаҳар":[40.4654166667,71.7166388889],"Фарғона шаҳар":[40.3946111111,71.7683888889],"Бешариқ тумани":[40.4358888889,70.6157777778],"Бағдод тумани":[40.4607777778,71.2116388889],"Бувайда тумани":[40.56025,71.1409444444],"Данғара тумани":[40.5779166667,70.9204166667],"Ёзёвон тумани":[40.5033888889,71.8544722222],"Қува тумани":[40.5376388889,72.0701944444],"Олтиариқ тумани":[40.3895277778,71.4743888889],"Қўштепа тумани":[40.5383333333,71.6454444444],"Риштон тумани":[40.3609444444,71.2942222222],"Сўх тумани":[39.9568055556,71.12925],"Тошлоқ тумани":[40.4850833333,71.754],"Ўзбекистон тумани":[40.3731111111,70.8192222222],"Учкўприк тумани":[40.5443611111,71.0540833333],"Фарғона тумани":[40.1719166667,71.7305833333],"Фурқат тумани":[40.4856666667,70.7906388889]};
 const state={activeRegion:"Все",today:Number(localStorage.getItem("kadastr-today")||1),mapRoute:Number(localStorage.getItem("kadastr-map-route")||1),map:null,mapLayer:null};
 const getDone=()=>JSON.parse(localStorage.getItem("kadastr-done")||"[]");
 const getDoneStops=()=>JSON.parse(localStorage.getItem("kadastr-done-stops")||"[]");
@@ -25,7 +26,7 @@ const allStops=()=>routes.flatMap(r=>r.stops.map((stop,index)=>({key:`${r.id}:${
 const getLogs=()=>JSON.parse(localStorage.getItem("kadastr-logs")||"[]");
 const settings=()=>({price:Number(localStorage.getItem("fuel-price")||8500),consumption:Number(localStorage.getItem("fuel-consumption")||7)});
 const money=n=>`${Math.round(n).toLocaleString("ru-RU")} сум`;
-function mapsUrl(route){const points=route.stops.map(s=>`${s}, Uzbekistan`);const p=new URLSearchParams({api:"1",origin:"Kirgili, Fergana, Uzbekistan",destination:points.at(-1)});if(points.length>1)p.set("waypoints",points.slice(0,-1).join("|"));return `https://www.google.com/maps/dir/?${p}`}
+function mapsUrl(route){const points=route.stops.map(s=>{const p=stopCoords[s];return p?`${p[0]},${p[1]}`:`${s}, Uzbekistan`});const p=new URLSearchParams({api:"1",origin:"40.435530,71.767210",destination:points.at(-1)});if(points.length>1)p.set("waypoints",points.slice(0,-1).join("|"));return `https://www.google.com/maps/dir/?${p}`}
 function navigate(id){const r=routes.find(x=>x.id===id);window.open(mapsUrl(r),"_blank");}
 function renderToday(){const r=routes.find(x=>x.id===state.today)||routes[0],done=getDone().includes(r.id),ds=getDoneStops();document.querySelector("#today-title").textContent=`День ${r.id} · ${r.title}`;document.querySelector("#todayRoute").innerHTML=`<div class="stop-list">${r.stops.map((stop,i)=>{const key=`${r.id}:${i}`,ok=ds.includes(key);return `<button class="stop-row ${ok?'is-done':''}" data-stop="${key}"><span class="stop-check">${ok?'✓':i+1}</span><span>${stop}</span></button>`}).join('')}</div><p class="muted">${r.stops.length} точки · ${r.km} км · ${r.workload.toLocaleString("ru-RU")} заявлений</p><div class="route-actions"><button class="map-button" data-map="${r.id}">🚗 Навигатор</button><button class="done-button ${done?"is-done":""}" data-done="${r.id}">${done?"✓ Маршрут выполнен":"Завершить маршрут"}</button></div>`}
 function renderStats(){const done=getDone().length,total=routes.length,km=routes.reduce((s,r)=>s+r.km,0),s=settings();document.querySelector("#stats").innerHTML=`<div class="stat"><strong>${done}/${total}</strong><span>маршрутов</span></div><div class="stat"><strong>${km.toLocaleString("ru-RU")}</strong><span>км всего</span></div><div class="stat"><strong>${money(km/100*s.consumption*s.price)}</strong><span>топливо, оценка</span></div>`;document.querySelector("#fuelSummary").textContent=`${s.price.toLocaleString("ru-RU")} сум/л · расход ${s.consumption} л/100 км`}
@@ -54,12 +55,7 @@ function renderPlanner(){
  document.querySelector('#plannerList').innerHTML=pending.map(x=>`<button class="planner-stop ${selected.includes(x.key)?'is-selected':''}" data-plan-stop="${x.key}"><span>${selected.includes(x.key)?'✓':x.index+1}</span><div><b>${x.stop}</b><small>${x.region} · ${x.route}</small></div></button>`).join('')+
  `<div class="planner-actions"><button class="primary-button" id="optimizePlan" ${selected.length!==2?'disabled':''}>🧭 Оптимизировать 2 точки</button><button class="text-button" id="clearPlan">Сбросить выбор</button></div><div id="planResult"></div>`;
 }
-async function geocodeCached(stop){
- const cache=getCoords(); if(cache[stop]) return cache[stop];
- const u='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ru&q='+encodeURIComponent(stop+', Fergana Valley, Uzbekistan');
- const r=await fetch(u,{headers:{'Accept':'application/json'}}); if(!r.ok) throw new Error('geocode'); const d=await r.json();
- if(!d[0]) return null; const g={lat:+d[0].lat,lon:+d[0].lon,name:d[0].display_name}; cache[stop]=g; setCoords(cache); return g;
-}
+async function geocodeCached(stop){const exact=pointForStop(stop);if(exact)return {...exact,name:"Точная координата из базы"};const cache=getCoords();if(cache[stop])return cache[stop];const u="https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ru&q="+encodeURIComponent(stop+", Uzbekistan");const r=await fetch(u,{headers:{"Accept":"application/json"}});if(!r.ok)throw new Error("geocode");const d=await r.json();if(!d[0])return null;const g={lat:+d[0].lat,lon:+d[0].lon,name:d[0].display_name};cache[stop]=g;setCoords(cache);return g;}
 async function roadRoute(a,b){
  const u=`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false&steps=false`;
  const r=await fetch(u); if(!r.ok) throw new Error('routing'); const d=await r.json(); if(d.code!=='Ok'||!d.routes?.[0]) throw new Error('routing'); return {km:d.routes[0].distance/1000,min:d.routes[0].duration/60};
@@ -89,27 +85,8 @@ function renderMapSelect(){
   const sel=document.querySelector('#mapRouteSelect'); if(!sel)return;
   sel.innerHTML=routes.map(r=>`<option value="${r.id}" ${r.id===state.mapRoute?'selected':''}>День ${r.id}: ${r.title}</option>`).join('');
 }
-async function geocode(q){
-  const u='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ru&q='+encodeURIComponent(q);
-  const r=await fetch(u,{headers:{'Accept':'application/json'}}); if(!r.ok) throw new Error('geocode');
-  const d=await r.json(); return d[0]?{lat:+d[0].lat,lon:+d[0].lon,name:d[0].display_name}:null;
-}
-async function loadMapPoints(){
-  if(!state.map) initMap(); if(!state.map)return;
-  const id=Number(document.querySelector('#mapRouteSelect').value), route=routes.find(r=>r.id===id);
-  state.mapRoute=id; localStorage.setItem('kadastr-map-route',id);
-  state.mapLayer.clearLayers(); const status=document.querySelector('#mapStatus');
-  status.textContent='Ищу координаты точек…'; const bounds=[];
-  for(let i=0;i<route.stops.length;i++){
-    try{
-      if(i) await new Promise(x=>setTimeout(x,1100));
-      const g=await geocode(route.stops[i]+', Fergana Region, Uzbekistan');
-      if(g){const marker=L.marker([g.lat,g.lon]).addTo(state.mapLayer);marker.bindPopup(`<b>${i+1}. ${route.stops[i]}</b><br><small>${g.name}</small>`);bounds.push([g.lat,g.lon]);}
-    }catch(e){}
-  }
-  if(bounds.length){state.map.fitBounds(bounds,{padding:[30,30]});status.textContent=`Найдено ${bounds.length} из ${route.stops.length} точек. Нажмите на маркер для адреса.`}
-  else status.textContent='Не удалось найти точки. Проверьте интернет-соединение.';
-}
+async function geocode(q){const exact=pointForStop(q);if(exact)return {...exact,name:"Точная координата из базы"};const u="https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ru&q="+encodeURIComponent(q);const r=await fetch(u,{headers:{"Accept":"application/json"}});if(!r.ok)throw new Error("geocode");const d=await r.json();return d[0]?{lat:+d[0].lat,lon:+d[0].lon,name:d[0].display_name}:null;}
+async function loadMapPoints(){if(!state.map)initMap();if(!state.map)return;const id=Number(document.querySelector("#mapRouteSelect").value),route=routes.find(r=>r.id===id);state.mapRoute=id;localStorage.setItem("kadastr-map-route",id);state.mapLayer.clearLayers();const status=document.querySelector("#mapStatus");status.textContent="Показываю точные координаты филиалов…";const bounds=[];const pts=[];route.stops.forEach((stop,i)=>{const p=pointForStop(stop);if(!p)return;pts.push([p.lat,p.lon]);const marker=L.marker([p.lat,p.lon]).addTo(state.mapLayer);marker.bindPopup(`<b>${i+1}. ${stop}</b><br><small>Точная координата из предоставленного списка</small><br><small>${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}</small>`);bounds.push([p.lat,p.lon]);});if(pts.length>1){try{const u=`https://router.project-osrm.org/route/v1/driving/${pts.map(p=>`${p[1]},${p[0]}`).join(";")}?overview=full&geometries=geojson&steps=false`;const rr=await fetch(u);const rd=await rr.json();if(rd.code==="Ok"&&rd.routes?.[0]?.geometry)L.geoJSON(rd.routes[0].geometry,{style:{weight:5}}).addTo(state.mapLayer);}catch(e){}}if(bounds.length){state.map.fitBounds(bounds,{padding:[30,30]});status.textContent=`Показано ${bounds.length} из ${route.stops.length} точек. Координаты взяты из предоставленного списка кадастров.`}else status.textContent="Не удалось загрузить точки."}
 function mapGo(){const id=Number(document.querySelector('#mapRouteSelect').value);navigate(id)}
 
 function locate(){const el=document.querySelector("#locationStatus");if(!navigator.geolocation){el.textContent="Геолокация недоступна";return}el.textContent="Определяю местоположение…";navigator.geolocation.getCurrentPosition(p=>{el.textContent=`GPS: ${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}`},()=>{el.textContent="Не удалось получить GPS"},{enableHighAccuracy:true,timeout:10000})}
