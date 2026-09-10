@@ -1,0 +1,75 @@
+# Кадастр Маршрут — Android
+
+Обновлённая мобильная версия проекта на Capacitor.
+
+## Что уже сделано
+- мобильный интерфейс с нижней навигацией;
+- экран маршрутов и фильтр по областям;
+- маршрут дня и выбор дня;
+- кнопка навигации через Google Maps;
+- отметка выполненного маршрута;
+- GPS-кнопка;
+- статистика километража и оценка топлива;
+- настройка цены пропана и расхода автомобиля;
+- журнал работ с локальным хранением;
+- чек-лист перед выездом;
+- приоритет маршрутов по нагрузке;
+- офлайн-кэш PWA-части.
+
+## Сборка Android
+Требуется Node.js, JDK 21, Android SDK и интернет для первого получения Gradle-зависимостей.
+
+```bash
+npm install
+npx cap add android
+npx cap sync android
+cd android
+./gradlew assembleDebug
+```
+
+Windows:
+
+```powershell
+npm install
+npx cap add android
+npx cap sync android
+cd android
+gradlew.bat assembleDebug
+```
+
+APK появится в `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+## App ID
+`uz.kadastr.route`
+
+## Название
+`Кадастр Маршрут`
+
+## v4 — планирование по 2 объекта в день
+- 47 отдельных объектов извлечены из 17 существующих маршрутов;
+- отметка каждого объекта отдельно, а не только целого маршрута;
+- локальный прогресс 0/47 … 47/47;
+- планировщик автоматически формирует пары по 2 ещё не выполненных объекта;
+- для каждой пары можно открыть навигацию существующего маршрута;
+- данные сохраняются на телефоне.
+
+Примечание: километраж маршрутов остаётся исходной оценкой из проекта. Для точного километража между каждым кадастровым отделением нужно один раз зафиксировать координаты 47 объектов.
+
+
+## v5
+- Умный планировщик выбирает до 2 объектов.
+- Геокодирование сохраняется локально.
+- Дорожное расстояние и время рассчитываются через OSRM.
+- Считаются пропан, компенсация 1000 сум/км и чистая разница.
+
+
+### GPS / геолокация
+
+Проект использует `@capacitor/geolocation` для Android. При первой попытке получить GPS приложение запросит системное разрешение на доступ к местоположению. После изменения зависимости APK необходимо пересобрать и установить заново.
+
+## v18 Smart Selection
+- The old multi-day planner is hidden from the main workflow.
+- On the main screen the user chooses one pending cadastral point.
+- The app suggests nearby pending points using road distance (OSRM) after a short geographic pre-filter.
+- Up to two suggested points can be added, and their order is optimized for a circular trip from the base and back.
+- GPS permission uses Capacitor Geolocation registered through `Capacitor.registerPlugin('Geolocation')` and Android fine/coarse location permissions.
