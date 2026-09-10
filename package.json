@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",
-    "@capacitor/core": "^7.4.3"
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/geolocation": "^7.1.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.4.3"
