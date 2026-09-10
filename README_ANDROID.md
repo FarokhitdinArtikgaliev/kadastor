@@ -66,3 +66,10 @@ APK появится в `android/app/build/outputs/apk/debug/app-debug.apk`.
 ### GPS / геолокация
 
 Проект использует `@capacitor/geolocation` для Android. При первой попытке получить GPS приложение запросит системное разрешение на доступ к местоположению. После изменения зависимости APK необходимо пересобрать и установить заново.
+
+## v18 Smart Selection
+- The old multi-day planner is hidden from the main workflow.
+- On the main screen the user chooses one pending cadastral point.
+- The app suggests nearby pending points using road distance (OSRM) after a short geographic pre-filter.
+- Up to two suggested points can be added, and their order is optimized for a circular trip from the base and back.
+- GPS permission uses Capacitor Geolocation registered through `Capacitor.registerPlugin('Geolocation')` and Android fine/coarse location permissions.
