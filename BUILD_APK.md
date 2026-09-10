@@ -1,18 +1,9 @@
-# Сборка APK через GitHub Actions
+# Kadastr Route v17 — Android build
 
-1. Создайте новый приватный репозиторий на GitHub.
-2. Загрузите содержимое этого проекта в репозиторий.
-3. Перейдите во вкладку **Actions**.
-4. Выберите **Build Android APK**.
-5. Нажмите **Run workflow**.
-6. После завершения откройте выполненный workflow.
-7. Внизу страницы скачайте artifact **Kadastr-Marshrut-v5-debug**.
-8. Внутри будет `Kadastr-Marshrut-v5-debug.apk`.
+1. `npm install`
+2. `npx cap add android` (only if `android/` does not exist)
+3. `node scripts/patch-android-permissions.js`
+4. `npx cap sync android`
+5. `cd android && ./gradlew assembleDebug`
 
-Workflow автоматически:
-- устанавливает Node.js и Capacitor;
-- создаёт Android-проект;
-- добавляет Internet/GPS permissions;
-- синхронизирует `www`;
-- собирает debug APK;
-- публикует APK как GitHub Actions Artifact.
+v17 explicitly requests Android location permission and includes a native PDF share path using Capacitor Filesystem + Share. The PDF is generated directly with jsPDF and an embedded Noto Sans font, avoiding `pdf.html()`/html2canvas freezes in Android WebView.
