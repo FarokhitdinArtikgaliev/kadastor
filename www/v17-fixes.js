@@ -14,7 +14,7 @@
   const reportData=p=>{const s=periodStart(p),v=visits().filter(x=>new Date(x.date)>=s),t=trips().filter(x=>new Date(x.date)>=s),km=t.reduce((a,x)=>a+Number(x.km||0),0),st=settings(),lit=km*st.consumption/100,fuel=lit*st.price,comp=km*st.rate,refs=json('kadastr-refuels-v15',[]).filter(x=>new Date(x.date)>=s),exp=json('kadastr-expenses-v15',[]).filter(x=>new Date(x.date)>=s),odo=json('kadastr-odometer-v15',null);return {v,t,km,lit,fuel,comp,net:comp-fuel,refs,exp,odo};};
   const title=p=>p==='day'?'Сегодня':p==='week'?'Текущая неделя':'Текущий месяц';
 
-  async function locationPlugin(){return window.Capacitor?.Plugins?.Geolocation||null;}
+  async function locationPlugin(){try{if(window.Capacitor?.registerPlugin){return window.__kadastrGeo||(window.__kadastrGeo=window.Capacitor.registerPlugin('Geolocation'));}return window.Capacitor?.Plugins?.Geolocation||null;}catch(e){return window.Capacitor?.Plugins?.Geolocation||null;}}
   async function requestGPS(){
     try{
       const geo=await locationPlugin();

@@ -73,7 +73,7 @@
   let watchId=null;
   // Native GPS for Android via @capacitor/geolocation, with browser fallback for web.
   let nativeWatchId=null;
-  async function getGeoPlugin(){return window.Capacitor?.Plugins?.Geolocation||null;}
+  async function getGeoPlugin(){try{if(window.Capacitor?.registerPlugin){return window.__kadastrGeo||(window.__kadastrGeo=window.Capacitor.registerPlugin('Geolocation'));}return window.Capacitor?.Plugins?.Geolocation||null;}catch(e){return window.Capacitor?.Plugins?.Geolocation||null;}}
   async function ensureLocationPermission(){const geo=await getGeoPlugin();if(!geo)return null;try{const p=await geo.checkPermissions();if(p.location==='granted'||p.location==='limited')return geo;const r=await geo.requestPermissions();if(r.location==='granted'||r.location==='limited')return geo;throw new Error('LOCATION_DENIED');}catch(e){throw e;}}
   async function beginWatch(){const a=getActive();if(!a){return;} if(watchId!==null||nativeWatchId!==null)return;
     try{const geo=await ensureLocationPermission();
@@ -160,5 +160,5 @@
   const tools=document.querySelector('#tools');if(tools){const art=document.createElement('article');art.className='tool-row';art.innerHTML='<div><h3>📄 Отчёты</h3><p>День, неделя, месяц и PDF по посещениям, GPS-пробегу, топливу и компенсации.</p></div><button class="text-button" id="reportsButton" type="button">Открыть</button>';tools.insertBefore(art,tools.firstElementChild);}
   document.addEventListener('click',e=>{const b=e.target.closest('#reportsButton');if(b)openReport('month');});
   // Public helpers for UI/testing.
-  window.kadastrV13={openVisit,openReport,createPdf,renderWorkday,finishDay};
+  window.kadastrV13={openVisit,openReport,createPdf,renderWorkday,finishDay,startDay};
 })();
