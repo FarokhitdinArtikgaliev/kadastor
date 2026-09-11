@@ -35,17 +35,17 @@
     const origin=`${p[0].lat},${p[0].lon}`;
     const destination=`${p[p.length-1].lat},${p[p.length-1].lon}`;
     const waypoints=p.length>2?p.slice(1,-1).map(x=>`${x.lat},${x.lon}`).join('|'):'';
-    const https=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}${waypoints?`&waypoints=${encodeURIComponent(waypoints)}`:''}`;
+    const https=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate${waypoints?`&waypoints=${encodeURIComponent(waypoints)}`:''}`;
     return https;
   }
-  function openGoogleMaps(points){
+  async function openGoogleMaps(points){
     const url=navUrl(points);
     if(url==='#')return false;
-    // Android intent: asks the OS to open the route in Google Maps instead of navigating the Capacitor WebView away.
-    const intent=url.replace(/^https:\/\//,'intent://');
-    const intentUrl=`${intent}#Intent;scheme=https;package=com.google.android.apps.maps;end`;
-    try{ const a=document.createElement('a'); a.href=intentUrl; a.target='_system'; a.rel='external'; document.body.appendChild(a); a.click(); a.remove(); return true; }catch{}
-    try{ window.open(intentUrl,'_blank'); return true; }catch{}
+    try{
+      const plugin=window.Capacitor?.Plugins?.MapsLauncher;
+      if(plugin?.openRoute){ await plugin.openRoute({url}); return true; }
+    }catch(e){}
+    try{ window.open(url,'_blank'); return true; }catch{}
     try{ window.location.href=url; return true; }catch{}
     return false;
   }
@@ -68,7 +68,7 @@
       <div class="stats"><div><span>Пробег</span><b>${num(km)} км</b><small>по дорожному маршруту</small></div><div><span>Заправки</span><b>${money(fuelSpent)}</b><small>${rs.length} записей</small></div><div><span>Компенсация</span><b>${money(compensation)}</b><small>${s.rate.toLocaleString('ru-RU')} сум/км</small></div><div><span>Чистыми</span><b>${money(net)}</b><small>компенсация − заправки</small></div></div>
       <div class="quick"><div><b>${vs.length}</b><span>посещено</span></div><div><b>${47-vs.length}</b><span>осталось</span></div><div><b>${num(estimated)} л</b><span>расчётное топливо</span></div></div>
       ${activeTrip?activeTripCard():`<button class="start-work" id="startWork">▶ Начать работу</button>`}
-      <div class="section-head"><h2>Что дальше</h2></div><div class="tips"><article><b>1</b><span>Выберите дом или филиал как старт.</span></article><article><b>2</b><span>Добавьте до 4 ближайших филиалов.</span></article><article><b>3</b><span>Нажмите «Навигация» — GPS начнёт считать пробег.</span></article></div>
+      <div class="section-head"><h2>Что дальше</h2></div><div class="tips"><article><b>1</b><span>Выберите дом или филиал как старт.</span></article><article><b>2</b><span>Добавьте до 4 ближайших филиалов.</span></article><article><b>3</b><span>Нажмите «Навигация» — пробег рассчитается по дорожному маршруту.</span></article></div>
       </section>`;
     $('#startWork')?.addEventListener('click',openPlanner);
     $('#finishWork')?.addEventListener('click',finishTrip);
@@ -124,7 +124,7 @@
     // No GPS is required: the trip mileage is the road distance of the selected route.
     closeModal();
     render();
-    const opened=openGoogleMaps(pts);
+    const opened=await openGoogleMaps(pts);
     if(!opened)alert('Не удалось открыть Google Maps. Попробуйте ещё раз.');
   }
 
@@ -160,7 +160,7 @@
   }
   function branchDetail(name){
     const b=branchByName(name),c=COORDS[name]||[],v=visits().find(x=>x.branch===name);
-    showModal(`<div class="branch-modal-title"><div class="eyebrow">${esc(b.region||'Филиал')}</div><h2>${esc(name)}</h2><div class="coords">📍 ${c.length?c[0].toFixed(6)+', '+c[1].toFixed(6):'—'}</div></div><div class="branch-person"><div class="person-icon">👨‍💼</div><div><b>${esc(b.staff||'Не указан')}</b><span>Бош муҳандис / Ответственный</span><a href="tel:${esc((b.staffPhone||'').replace(/[^+\d]/g,''))}">📞 ${esc(b.staffPhone||'—')}</a></div></div><div class="branch-person"><div class="person-icon">💼</div><div><b>${esc(b.head||'Не указан')}</b><span>Филиал бошлиғи / Руководитель</span><a href="tel:${esc((b.phone||'').replace(/[^+\d]/g,''))}">📞 ${esc(b.phone||'—')}</a></div></div><div class="detail-extra"><div><span>Адрес</span><b>${esc(b.address||'—')}</b></div><div><span>Email</span><b>${esc(b.email||'—')}</b></div><div><span>Последнее посещение</span><b>${v?dateFmt(v.date):'Не посещён'}</b></div></div><div class="branch-modal-actions"><a class="ghost" href="tel:${esc((b.staffPhone||b.phone||'').replace(/[^+\d]/g,''))}">📞 Сотрудник</a><a class="ghost" href="tel:${esc((b.phone||'').replace(/[^+\d]/g,''))}">📞 Руководитель</a><button class="primary" id="branchNav">🧭 Навигация</button><button class="ghost" id="visitNow">✓ Посетить</button></div><div class="modal-actions"><button class="ghost" data-close>Закрыть</button></div>`);
+    showModal(`<div class="branch-modal-title"><div class="eyebrow">${esc(b.region||'Филиал')}</div><h2>${esc(name)}</h2><div class="coords">📍 ${c.length?c[0].toFixed(6)+', '+c[1].toFixed(6):'—'}</div></div><div class="branch-person"><div class="person-icon">👨‍💼</div><div><b>${esc(b.staff||'Не указан')}</b><span>Бош муҳандис / Ответственный</span><div class="branch-phone">📞 ${esc(b.staffPhone||'—')}</div></div></div><div class="branch-person"><div class="person-icon">💼</div><div><b>${esc(b.head||'Не указан')}</b><span>Филиал бошлиғи / Руководитель</span><div class="branch-phone">📞 ${esc(b.phone||'—')}</div></div></div><div class="detail-extra"><div><span>Адрес</span><b>${esc(b.address||'—')}</b></div><div><span>Email</span><b>${esc(b.email||'—')}</b></div><div><span>Последнее посещение</span><b>${v?dateFmt(v.date):'Не посещён'}</b></div></div><div class="branch-modal-actions"><button class="primary" id="branchNav">🧭 Навигация</button><button class="ghost" id="visitNow">✓ Посетить</button></div><div class="modal-actions"><button class="ghost" data-close>Закрыть</button></div>`);
     $('#branchNav').onclick=()=>{closeModal();singleNav(name)};
     $('#visitNow').onclick=()=>{saveVisit({branch:name,status:'Посещено',notes:'Отмечено вручную',date:new Date().toISOString()});closeModal();render()};
   }
