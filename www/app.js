@@ -10,14 +10,20 @@
   const save=(k,v)=>localStorage.setItem(key(k),JSON.stringify(v));
   const branchByName=name=>{const c=COORDS[name]||[];return {name,lat:c[0],lon:c[1],phone:BRANCH_PHONES[name]||'',staffPhone:STAFF_PHONES[name]||'',...(BRANCH_INFO[name]||{})}};
   const allBranches=()=>Object.keys(COORDS).map(branchByName);
-  const settings=()=>({...load('settings',{rate:1000,fuelPrice:8500,consumption:7,fuel:'Пропан',autoVisit:true,radius:200}),});
+  const settings=()=>{
+    const d={rate:1000,fuelPrice:5200,consumption:9,fuel:'Метан',tankLiters:100,fullFillCost:105000,fullRangeKm:225,navigation:'yandex'};
+    const v=load('settings',d);
+    if(v.fuel==='Пропан' && Number(v.fuelPrice)===8500 && Number(v.consumption)===7){const migrated={...v,fuel:'Метан',fuelPrice:5200,consumption:9,tankLiters:100,fullFillCost:105000,fullRangeKm:225,navigation:v.navigation||'yandex'};save('settings',migrated);return migrated}
+    if(!v.navigation){const migrated={...v,navigation:'yandex'};save('settings',migrated);return migrated}
+    return {...d,...v};
+  };
   const visits=()=>load('visits',[]);
   const trips=()=>load('trips',[]);
   const refuels=()=>load('refuels',[]);
   const expenses=()=>load('expenses',[]);
   let tab='home';
   let planner={origin:null,points:[],suggestions:[],busy:false,includeHomeReturn:true};
-  let watchId=null,lastGps=null,activeTrip=load('activeTrip',null);
+  let lastGps=null,activeTrip=load('activeTrip',null);
   const MapsLauncher=window.Capacitor?.registerPlugin ? window.Capacitor.registerPlugin('MapsLauncher') : null;
 
   function hav(a,b){const R=6371, p=Math.PI/180,dLat=(b.lat-a.lat)*p,dLon=(b.lon-a.lon)*p;const x=Math.sin(dLat/2)**2+Math.cos(a.lat*p)*Math.cos(b.lat*p)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(x));}
@@ -30,24 +36,44 @@
     try{const u=`https://router.project-osrm.org/route/v1/driving/${points.map(p=>`${p.lon},${p.lat}`).join(';')}?overview=false&steps=false`;const r=await fetch(u);if(!r.ok)throw 0;const j=await r.json();if(j.routes?.[0])return {km:j.routes[0].distance/1000,min:j.routes[0].duration/60,road:true};}catch{}
     let km=0;for(let i=1;i<points.length;i++)km+=hav(points[i-1],points[i])*1.18;return {km,min:km/45*60,road:false};
   }
-  function navUrl(points){
+  function googleMapsUrl(points){
     const p=points.filter(Boolean);
     if(p.length<2)return '#';
     const origin=`${p[0].lat},${p[0].lon}`;
     const destination=`${p[p.length-1].lat},${p[p.length-1].lon}`;
     const waypoints=p.length>2?p.slice(1,-1).map(x=>`${x.lat},${x.lon}`).join('|'):'';
-    const https=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate${waypoints?`&waypoints=${encodeURIComponent(waypoints)}`:''}`;
-    return https;
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate${waypoints?`&waypoints=${encodeURIComponent(waypoints)}`:''}`;
   }
-  async function openGoogleMaps(points){
-    const url=navUrl(points);
+  function yandexNavigatorUrl(points){
+    const p=points.filter(Boolean);
+    if(p.length<2)return '#';
+    const q=new URLSearchParams();
+    q.set('lat_from',p[0].lat);q.set('lon_from',p[0].lon);
+    q.set('lat_to',p[p.length-1].lat);q.set('lon_to',p[p.length-1].lon);
+    p.slice(1,-1).forEach((x,i)=>{q.set(`lat_via_${i}`,x.lat);q.set(`lon_via_${i}`,x.lon)});
+    return `yandexnavi://build_route_on_map?${q.toString()}`;
+  }
+  function yandexWebUrl(points){
+    const p=points.filter(Boolean);
+    if(p.length<2)return '#';
+    return `https://yandex.com/maps/?rtext=${encodeURIComponent(p.map(x=>`${x.lat},${x.lon}`).join('~'))}&rtt=auto`;
+  }
+  async function openNavigation(points){
+    const nav=settings().navigation||'yandex';
+    const url=nav==='google'?googleMapsUrl(points):yandexNavigatorUrl(points);
+    const pkg=nav==='google'?'com.google.android.apps.maps':'ru.yandex.yandexnavi';
     if(url==='#')return false;
     try{
       const plugin=MapsLauncher || window.Capacitor?.Plugins?.MapsLauncher;
-      if(plugin?.openRoute){ await plugin.openRoute({url}); return true; }
+      if(plugin?.openRoute){ await plugin.openRoute({url,packageName:pkg,fallbackUrl:nav==='google'?googleMapsUrl(points):yandexWebUrl(points)}); return true; }
     }catch(e){}
-    try{ window.open(url,'_blank'); return true; }catch{}
-    try{ window.location.href=url; return true; }catch{}
+    if(nav==='google'){
+      try{ window.open(url,'_blank'); return true; }catch{}
+      try{ window.location.href=url; return true; }catch{}
+    }else{
+      try{ window.location.href=url; return true; }catch{}
+      try{ window.open(yandexWebUrl(points),'_blank'); return true; }catch{}
+    }
     return false;
   }
   function routePoints(){const out=[];if(planner.origin)out.push(planner.origin);for(const n of planner.points)out.push(branchByName(n));if(planner.includeHomeReturn && planner.points.length)out.push({name:'Дом',...START_POINT});return out;}
@@ -67,7 +93,7 @@
     const net=compensation-fuelSpent;
     $('#screen').innerHTML=`<section class="page home"><div class="hero"><div><div class="eyebrow">Полевой помощник</div><h1>Ваш рабочий маршрут</h1><p>Выбирайте точку, стройте маршрут до 4 филиалов и ведите фактический пробег.</p></div><div class="hero-mark">⌖</div></div>
       <div class="stats"><div><span>Пробег</span><b>${num(km)} км</b><small>по дорожному маршруту</small></div><div><span>Заправки</span><b>${money(fuelSpent)}</b><small>${rs.length} записей</small></div><div><span>Компенсация</span><b>${money(compensation)}</b><small>${s.rate.toLocaleString('ru-RU')} сум/км</small></div><div><span>Чистыми</span><b>${money(net)}</b><small>компенсация − заправки</small></div></div>
-      <div class="quick"><div><b>${vs.length}</b><span>посещено</span></div><div><b>${47-vs.length}</b><span>осталось</span></div><div><b>${num(estimated)} л</b><span>расчётное топливо</span></div></div>
+      <div class="quick"><div><b>${vs.length}</b><span>посещено</span></div><div><b>${47-vs.length}</b><span>осталось</span></div><div><b>${num(estimated)} ${s.fuel==='Метан'?'м³':'л'}</b><span>расчётное топливо</span></div></div>
       ${activeTrip?activeTripCard():`<button class="start-work" id="startWork">▶ Начать работу</button>`}
       <div class="section-head"><h2>Что дальше</h2></div><div class="tips"><article><b>1</b><span>Выберите дом или филиал как старт.</span></article><article><b>2</b><span>Добавьте до 4 ближайших филиалов.</span></article><article><b>3</b><span>Нажмите «Навигация» — пробег рассчитается по дорожному маршруту.</span></article></div>
       </section>`;
@@ -151,8 +177,8 @@
     // No GPS is required: the trip mileage is the road distance of the selected route.
     closeModal();
     render();
-    const opened=await openGoogleMaps(pts);
-    if(!opened)alert('Не удалось открыть Google Maps. Попробуйте ещё раз.');
+    const opened=await openNavigation(pts);
+    if(!opened)alert(`Не удалось открыть ${settings().navigation==='google'?'Google Maps':'Яндекс.Навигатор'}. Проверьте, что приложение установлено.`);
   }
 
   function getGeo(){return null}
@@ -196,7 +222,7 @@
     await startNavigation();
   }
 
-  function renderReports(){const vs=visits().sort((a,b)=>new Date(b.date)-new Date(a.date)),ts=trips();const rows=vs.map(v=>`<article class="report-row"><div><b>${esc(v.branch)}</b><span>${esc(v.status)}${v.auto?' · GPS':''}</span><small>${dateFmt(v.date)}</small>${v.notes?`<p>${esc(v.notes)}</p>`:''}</div><button class="ghost small" data-editvisit="${esc(v.id||v.date)}">Изменить</button></article>`).join('');$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Журнал работы</div><h1>Отчёты</h1><p>Какие объекты посещены и когда.</p></div><button class="primary small" id="addVisit">+ Посещение</button></div><div class="periods"><button class="period active" data-period="all">Все</button><button class="period" data-period="today">Сегодня</button><button class="period" data-period="week">Неделя</button><button class="period" data-period="month">Месяц</button></div><div id="reportList" class="report-list">${rows||'<div class="empty">Посещений пока нет.</div>'}</div><div class="card"><div class="section-head"><h2>Поездки</h2><span>${ts.length}</span></div>${ts.slice(0,10).map(t=>`<div class="trip-row"><b>${num(t.km)} км</b><span>${esc((t.points||[]).join(' → '))}</span><small>${dateFmt(t.date)}</small></div>`).join('')||'<div class="empty">Поездок пока нет.</div>'}</div></section>`;
+  function renderReports(){const vs=visits().sort((a,b)=>new Date(b.date)-new Date(a.date)),ts=trips();const rows=vs.map(v=>`<article class="report-row"><div><b>${esc(v.branch)}</b><span>${esc(v.status)}</span><small>${dateFmt(v.date)}</small>${v.notes?`<p>${esc(v.notes)}</p>`:''}</div><button class="ghost small" data-editvisit="${esc(v.id||v.date)}">Изменить</button></article>`).join('');$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Журнал работы</div><h1>Отчёты</h1><p>Какие объекты посещены и когда.</p></div><button class="primary small" id="addVisit">+ Посещение</button></div><div class="periods"><button class="period active" data-period="all">Все</button><button class="period" data-period="today">Сегодня</button><button class="period" data-period="week">Неделя</button><button class="period" data-period="month">Месяц</button></div><div id="reportList" class="report-list">${rows||'<div class="empty">Посещений пока нет.</div>'}</div><div class="card"><div class="section-head"><h2>Поездки</h2><span>${ts.length}</span></div>${ts.slice(0,10).map(t=>`<div class="trip-row"><b>${num(t.km)} км</b><span>${esc((t.points||[]).join(' → '))}</span><small>${dateFmt(t.date)}</small></div>`).join('')||'<div class="empty">Поездок пока нет.</div>'}</div></section>`;
     $('#addVisit').onclick=()=>openVisitForm();$$('[data-editvisit]').forEach(b=>b.onclick=()=>openVisitForm(vs.find(v=>(v.id||v.date)===b.dataset.editvisit)));
     $$('.period').forEach(b=>b.onclick=()=>filterReports(b.dataset.period));
   }
@@ -204,12 +230,17 @@
   function openVisitForm(existing){const opts=allBranches().map(b=>`<option ${existing?.branch===b.name?'selected':''}>${esc(b.name)}</option>`).join('');showModal(`<h2>${existing?'Изменить':'Новое'} посещение</h2><form id="visitForm"><label class="field">Филиал<select name="branch">${opts}</select></label><label class="field">Статус<select name="status"><option ${existing?.status==='Посещено'?'selected':''}>Посещено</option><option ${existing?.status==='Частично выполнено'?'selected':''}>Частично выполнено</option><option ${existing?.status==='Нужно повторно'?'selected':''}>Нужно повторно</option><option ${existing?.status==='Проблема'?'selected':''}>Проблема</option></select></label><label class="field">Что сделано<textarea name="notes" placeholder="Результат визита">${esc(existing?.notes||'')}</textarea></label><div class="modal-actions"><button type="button" class="ghost" data-close>Отмена</button><button class="primary">Сохранить</button></div></form>`);$('#visitForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);const item={id:existing?.id||crypto.randomUUID?.()||String(Date.now()),branch:f.get('branch'),status:f.get('status'),notes:f.get('notes'),date:existing?.date||new Date().toISOString()};const arr=visits();const i=arr.findIndex(v=>v.id===item.id);if(i>=0)arr[i]=item;else arr.unshift(item);save('visits',arr);closeModal();render()};}
   function saveVisit(v){const arr=visits();arr.unshift({...v,id:v.id||crypto.randomUUID?.()||String(Date.now())});save('visits',arr.slice(0,1000));}
 
-  function renderFinance(){const s=settings(),km=trips().reduce((a,t)=>a+Number(t.km||0),0),comp=km*s.rate,rf=refuels(),fuel=rf.reduce((a,r)=>a+Number(r.total||0),0),exp=expenses(),other=exp.reduce((a,r)=>a+Number(r.amount||0),0);$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Доходы и расходы</div><h1>Финансы</h1><p>Заправки и расчёт компенсации по маршрутам.</p></div></div><div class="finance-total"><span>Расчётный результат</span><b>${money(comp-fuel-other)}</b><small>${num(km)} км × ${s.rate.toLocaleString('ru-RU')} − ${money(fuel)} заправки − ${money(other)} прочее</small></div><div class="finance-actions"><button class="primary" id="addFuel">+ Заправка</button><button class="ghost" id="addExpense">+ Расход</button></div><div class="card"><div class="section-head"><h2>Заправки</h2><b>${money(fuel)}</b></div>${rf.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.fuel)}</b><span>${num(r.liters)} л · ${dateFmt(r.date)}</span></div><strong>${money(r.total)}</strong></div>`).join('')||'<div class="empty">Заправок пока нет.</div>'}</div><div class="card"><div class="section-head"><h2>Прочие расходы</h2><b>${money(other)}</b></div>${exp.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.title)}</b><span>${dateFmt(r.date)}</span></div><strong>${money(r.amount)}</strong></div>`).join('')||'<div class="empty">Других расходов нет.</div>'}</div></section>`;$('#addFuel').onclick=openFuel;$('#addExpense').onclick=openExpense;}
-  function openFuel(){const s=settings();showModal(`<h2>Заправка</h2><form id="fuelForm"><label class="field">Топливо<select name="fuel"><option>Бензин</option><option ${s.fuel==='Пропан'?'selected':''}>Пропан</option><option ${s.fuel==='Метан'?'selected':''}>Метан</option></select></label><label class="field">Литры<input name="liters" type="number" step="0.1" required></label><label class="field">Цена за литр<input name="price" type="number" value="${s.fuelPrice}" required></label><div class="modal-actions"><button type="button" class="ghost" data-close>Отмена</button><button class="primary">Сохранить</button></div></form>`);$('#fuelForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target),r={fuel:f.get('fuel'),liters:Number(f.get('liters')),price:Number(f.get('price')),total:Number(f.get('liters'))*Number(f.get('price')),date:new Date().toISOString()};const a=refuels();a.unshift(r);save('refuels',a);closeModal();render()}}
+  function renderFinance(){const s=settings(),km=trips().reduce((a,t)=>a+Number(t.km||0),0),comp=km*s.rate,rf=refuels(),fuel=rf.reduce((a,r)=>a+Number(r.total||0),0),exp=expenses(),other=exp.reduce((a,r)=>a+Number(r.amount||0),0);$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Доходы и расходы</div><h1>Финансы</h1><p>Заправки и расчёт компенсации по маршрутам.</p></div></div><div class="finance-total"><span>Расчётный результат</span><b>${money(comp-fuel-other)}</b><small>${num(km)} км × ${s.rate.toLocaleString('ru-RU')} − ${money(fuel)} заправки − ${money(other)} прочее</small></div><div class="finance-actions"><button class="primary" id="addFuel">+ Заправка</button><button class="ghost" id="addExpense">+ Расход</button></div><div class="card"><div class="section-head"><h2>Заправки</h2><b>${money(fuel)}</b></div>${rf.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.fuel)}</b><span>${num(r.amount ?? r.liters)} ${r.unit || (r.fuel==='Метан'?'м³':'л')} · ${dateFmt(r.date)}</span></div><strong>${money(r.total)}</strong></div>`).join('')||'<div class="empty">Заправок пока нет.</div>'}</div><div class="card"><div class="section-head"><h2>Прочие расходы</h2><b>${money(other)}</b></div>${exp.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.title)}</b><span>${dateFmt(r.date)}</span></div><strong>${money(r.amount)}</strong></div>`).join('')||'<div class="empty">Других расходов нет.</div>'}</div></section>`;$('#addFuel').onclick=openFuel;$('#addExpense').onclick=openExpense;}
+  function openFuel(){const s=settings();showModal(`<h2>Заправка</h2><form id="fuelForm"><label class="field">Топливо<select name="fuel" id="fuelFormType"><option ${s.fuel==='Бензин'?'selected':''}>Бензин</option><option ${s.fuel==='Пропан'?'selected':''}>Пропан</option><option ${s.fuel==='Метан'?'selected':''}>Метан</option></select></label><label class="field"><span id="fuelAmountLabel">${s.fuel==='Метан'?'Количество, м³':'Количество, л'}</span><input name="amount" id="fuelAmount" type="number" step="0.1" required></label><label class="field"><span id="fuelPriceLabel">${s.fuel==='Метан'?'Цена за м³':'Цена за литр'}</span><input name="price" id="fuelFormPrice" type="number" value="${s.fuelPrice}" required></label><div class="modal-actions"><button type="button" class="ghost" data-close>Отмена</button><button class="primary">Сохранить</button></div></form>`);
+    const type=$('#fuelFormType'), amount=$('#fuelAmount'), price=$('#fuelFormPrice');
+    const sync=()=>{const methane=type.value==='Метан';$('#fuelAmountLabel').textContent=methane?'Количество, м³':'Количество, л';$('#fuelPriceLabel').textContent=methane?'Цена за м³':'Цена за литр';if(methane&&Number(price.value)===8500)price.value=5200;if(!methane&&Number(price.value)===5200)price.value=8500};type.addEventListener('change',sync);
+    $('#fuelForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target),fuel=f.get('fuel'),amountValue=Number(f.get('amount')),priceValue=Number(f.get('price'));const r={fuel,amount:amountValue,unit:fuel==='Метан'?'м³':'л',price:priceValue,total:amountValue*priceValue,date:new Date().toISOString()};const a=refuels();a.unshift(r);save('refuels',a);closeModal();render()}
+  }
   function openExpense(){showModal(`<h2>Прочий расход</h2><form id="expenseForm"><label class="field">Название<input name="title" placeholder="Мойка, парковка, ремонт…" required></label><label class="field">Сумма<input name="amount" type="number" required></label><div class="modal-actions"><button type="button" class="ghost" data-close>Отмена</button><button class="primary">Сохранить</button></div></form>`);$('#expenseForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target),a=expenses();a.unshift({title:f.get('title'),amount:Number(f.get('amount')),date:new Date().toISOString()});save('expenses',a);closeModal();render()}}
 
-  function renderSettings(){const s=settings();$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Персонализация</div><h1>Настройки</h1><p>Здесь меняются расчёты и правила учёта посещений.</p></div></div><div class="card"><h2>Автомобиль</h2><label class="field">Вид топлива<select id="fuelType"><option ${s.fuel==='Бензин'?'selected':''}>Бензин</option><option ${s.fuel==='Пропан'?'selected':''}>Пропан</option><option ${s.fuel==='Метан'?'selected':''}>Метан</option></select></label><label class="field">Расход, л на 100 км<input id="consumption" type="number" step="0.1" value="${s.consumption}"></label><label class="field">Цена топлива, сум/л<input id="fuelPrice" type="number" value="${s.fuelPrice}"></label></div><div class="card"><h2>Компенсация</h2><label class="field">Сумма за 1 км, сум<input id="rate" type="number" value="${s.rate}"></label><p class="hint">Компенсация считается по расчётному дорожному пробегу выбранных маршрутов.</p></div><div class="card"><h2>Учёт посещения</h2><label class="check"><input id="autoVisit" type="checkbox" ${s.autoVisit?'checked':''}> Автоматически отмечать филиал при приближении</label><label class="field">Радиус, метров<input id="radius" type="number" min="50" max="1000" step="50" value="${s.radius}"></label><p class="hint">Можно отключить и отмечать посещения только вручную.</p></div><div class="card"><h2>Данные</h2><div class="settings-actions"><button class="ghost" id="export">Экспортировать резервную копию</button><button class="danger" id="reset">Сбросить данные</button></div></div></section>`;
-    ['fuelType','consumption','fuelPrice','rate','autoVisit','radius'].forEach(id=>$('#'+id).addEventListener('change',()=>{const n={fuel:$('#fuelType').value,consumption:Number($('#consumption').value),fuelPrice:Number($('#fuelPrice').value),rate:Number($('#rate').value),autoVisit:$('#autoVisit').checked,radius:Number($('#radius').value)};save('settings',n);render()}));
+  function renderSettings(){const s=settings();const methane=s.fuel==='Метан';$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Персонализация</div><h1>Настройки</h1><p>Расчёт топлива, компенсации и навигации.</p></div></div><div class="card"><h2>Автомобиль</h2><label class="field">Вид топлива<select id="fuelType"><option ${s.fuel==='Бензин'?'selected':''}>Бензин</option><option ${s.fuel==='Пропан'?'selected':''}>Пропан</option><option ${s.fuel==='Метан'?'selected':''}>Метан</option></select></label><label class="field">Расход, ${methane?'м³':'л'} на 100 км<input id="consumption" type="number" step="0.1" value="${s.consumption}"></label><label class="field">Цена топлива, сум/${methane?'м³':'л'}<input id="fuelPrice" type="number" value="${s.fuelPrice}"></label><div class="card-note"><b>Метан — твои текущие данные</b><span>Баллон 100 л · полная заправка примерно 100 000–110 000 сум · пробег 200–250 км.</span></div></div><div class="card"><h2>Навигация</h2><label class="field">Приложение для маршрута<select id="navigation"><option value="yandex" ${s.navigation!=='google'?'selected':''}>Яндекс.Навигатор</option><option value="google" ${s.navigation==='google'?'selected':''}>Google Maps</option></select></label><p class="hint">Выбранное приложение будет открываться после расчёта маршрута.</p></div><div class="card"><h2>Компенсация</h2><label class="field">Сумма за 1 км, сум<input id="rate" type="number" value="${s.rate}"></label><p class="hint">Компенсация считается по расчётному дорожному пробегу выбранных маршрутов.</p></div><div class="card"><h2>Учёт посещения</h2><p class="hint">GPS не используется. После завершения маршрута филиалы отмечаются вручную.</p></div><div class="card"><h2>Данные</h2><div class="settings-actions"><button class="ghost" id="export">Экспортировать резервную копию</button><button class="danger" id="reset">Сбросить данные</button></div></div></section>`;
+    $('#fuelType').addEventListener('change',()=>{const fuel=$('#fuelType').value;const methane=fuel==='Метан';save('settings',{...settings(),fuel,consumption:methane?9:Number($('#consumption').value)||7,fuelPrice:methane?5200:Number($('#fuelPrice').value)||8500});render()});
+    ['consumption','fuelPrice','rate','navigation'].forEach(id=>$('#'+id).addEventListener('change',()=>{save('settings',{...settings(),consumption:Number($('#consumption').value),fuelPrice:Number($('#fuelPrice').value),rate:Number($('#rate').value),navigation:$('#navigation').value});render()}));
     $('#export').onclick=exportData;$('#reset').onclick=()=>{if(confirm('Удалить все поездки, посещения, заправки и настройки?')){Object.keys(localStorage).filter(k=>k.startsWith('k2-')).forEach(k=>localStorage.removeItem(k));location.reload()}};
   }
   function exportData(){const data={version:2,exportedAt:new Date().toISOString(),settings:settings(),visits:visits(),trips:trips(),refuels:refuels(),expenses:expenses()};const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=`kadastr-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
