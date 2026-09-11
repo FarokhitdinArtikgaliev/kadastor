@@ -45,11 +45,21 @@ public class MapsLauncherPlugin extends Plugin {
       call.reject("URL маршрута не задан");
       return;
     }
-    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-    if (packageName != null && !packageName.isEmpty()) intent.setPackage(packageName);
     try {
+      if ("ru.yandex.yandexnavi".equals(packageName)) {
+        android.content.Intent legacy = new android.content.Intent("ru.yandex.yandexnavi.action.BUILD_ROUTE_ON_MAP");
+        legacy.setPackage(packageName);
+        android.net.Uri parsed = android.net.Uri.parse(url);
+        String v = parsed.getQueryParameter("lat_from"); if (v != null) legacy.putExtra("lat_from", Double.parseDouble(v));
+        v = parsed.getQueryParameter("lon_from"); if (v != null) legacy.putExtra("lon_from", Double.parseDouble(v));
+        v = parsed.getQueryParameter("lat_to"); if (v != null) legacy.putExtra("lat_to", Double.parseDouble(v));
+        v = parsed.getQueryParameter("lon_to"); if (v != null) legacy.putExtra("lon_to", Double.parseDouble(v));
+        if (getActivity().getPackageManager().queryIntentActivities(legacy, 0).size() > 0) { getActivity().startActivity(legacy); JSObject out = new JSObject(); out.put("opened", true); call.resolve(out); return; }
+      }
+      Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+      if (packageName != null && !packageName.isEmpty()) intent.setPackage(packageName);
       getActivity().startActivity(intent);
-      call.resolve(new JSObject());
+      JSObject out = new JSObject(); out.put("opened", true); call.resolve(out);
     } catch (ActivityNotFoundException e) {
       // Selected navigation app is not installed: fall back to a normal web URL.
       try {
