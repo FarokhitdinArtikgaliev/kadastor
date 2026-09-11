@@ -8,8 +8,8 @@
   const key=s=>`k2-${s}`;
   const load=(k,f)=>{try{return JSON.parse(localStorage.getItem(key(k))||JSON.stringify(f))}catch{return f}};
   const save=(k,v)=>localStorage.setItem(key(k),JSON.stringify(v));
-  const allBranches=()=>Object.keys(COORDS).map(name=>({name,...COORDS[name] ? {lat:COORDS[name][0],lon:COORDS[name][1]}:{}}));
   const branchByName=name=>{const c=COORDS[name]||[];return {name,lat:c[0],lon:c[1],phone:BRANCH_PHONES[name]||'',staffPhone:STAFF_PHONES[name]||'',...(BRANCH_INFO[name]||{})}};
+  const allBranches=()=>Object.keys(COORDS).map(branchByName);
   const settings=()=>({...load('settings',{rate:1000,fuelPrice:8500,consumption:7,fuel:'Пропан',autoVisit:true,radius:200}),});
   const visits=()=>load('visits',[]);
   const trips=()=>load('trips',[]);
@@ -18,6 +18,7 @@
   let tab='home';
   let planner={origin:null,points:[],suggestions:[],busy:false,includeHomeReturn:true};
   let watchId=null,lastGps=null,activeTrip=load('activeTrip',null);
+  const MapsLauncher=window.Capacitor?.registerPlugin ? window.Capacitor.registerPlugin('MapsLauncher') : null;
 
   function hav(a,b){const R=6371, p=Math.PI/180,dLat=(b.lat-a.lat)*p,dLon=(b.lon-a.lon)*p;const x=Math.sin(dLat/2)**2+Math.cos(a.lat*p)*Math.cos(b.lat*p)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(x));}
   async function osrmDistance(a,b){
@@ -42,7 +43,7 @@
     const url=navUrl(points);
     if(url==='#')return false;
     try{
-      const plugin=window.Capacitor?.Plugins?.MapsLauncher;
+      const plugin=MapsLauncher || window.Capacitor?.Plugins?.MapsLauncher;
       if(plugin?.openRoute){ await plugin.openRoute({url}); return true; }
     }catch(e){}
     try{ window.open(url,'_blank'); return true; }catch{}
@@ -82,7 +83,7 @@
     $$('.origin').forEach(b=>b.addEventListener('click',()=>chooseOrigin(b.dataset.origin)));
   }
   function chooseOrigin(type){
-    if(type==='home'){planner.origin={name:'Дом',...START_POINT};renderPlannerStep();refreshSuggestions();}
+    if(type==='home'){planner.origin={name:'Дом',...START_POINT};planner.includeHomeReturn=false;renderPlannerStep();refreshSuggestions();}
     else{
       const opts=allBranches().map(b=>`<option value="${esc(b.name)}">${esc(b.name)} · ${esc(b.region||'')}</option>`).join('');
       $('#plannerStep').innerHTML=`<label class="field">Стартовый филиал<select id="originSelect"><option value="">Выберите...</option>${opts}</select></label>`;
@@ -91,24 +92,50 @@
   }
   function renderPlannerStep(){
     const o=planner.origin;if(!o)return;
-    $('#plannerStep').innerHTML=`<div class="origin-picked"><span>Старт</span><b>${esc(o.name)}</b></div><div id="routeSummary" class="route-summary"><span>Подсчитываем...</span></div><div class="field"><label>Возврат домой <input id="returnHome" type="checkbox" ${planner.includeHomeReturn?'checked':''}> <span class="switch-text">добавить Дом в конец маршрута</span></label></div><div class="section-head compact"><h3>Ближайшие филиалы</h3><small>По дороге от выбранной точки</small></div><div id="suggestions" class="suggestions"><div class="loading">Рассчитываем расстояние и время…</div></div><div class="selected-box"><div class="section-head compact"><h3>Маршрут <span>${planner.points.length}/4</span></h3><small>${planner.points.length?'точки выбраны':'можно ограничиться одной'}</small></div><div id="selectedPoints"></div><div class="planner-actions"><button class="primary" id="navigatePlan" ${planner.points.length?'':'disabled'}>🧭 Навигация</button><button class="ghost" id="clearPlan">Сбросить</button></div></div>`;
-    $('#returnHome').addEventListener('change',e=>{planner.includeHomeReturn=e.target.checked;updateRouteSummary()});
+    const fromHome=o.name==='Дом';
+    $('#plannerStep').innerHTML=`<div class="origin-picked"><span>Старт</span><b>${esc(o.name)}</b></div><div id="routeSummary" class="route-summary"><span>Подсчитываем...</span></div>${fromHome?'':`<div class="field"><label>Возврат домой <input id="returnHome" type="checkbox" ${planner.includeHomeReturn?'checked':''}> <span class="switch-text">добавить Дом в конец маршрута</span></label></div>`}<div class="section-head compact"><h3>${fromHome?'Все филиалы':'Ближайшие филиалы'}</h3><small>${fromHome?'Выберите до 4 филиалов':'По дороге от выбранной точки'}</small></div><div id="suggestions" class="suggestions"><div class="loading">${fromHome?'Загружаем список филиалов…':'Рассчитываем расстояние и время…'}</div></div><div class="selected-box"><div class="section-head compact"><h3>Маршрут <span id="routeCount">${planner.points.length}/4</span></h3><small id="routeHint">${planner.points.length?'точки выбраны':'можно ограничиться одной'}</small></div><div id="selectedPoints"></div><div class="planner-actions"><button class="primary" id="navigatePlan" ${planner.points.length?'':'disabled'}>🧭 Навигация</button><button class="ghost" id="clearPlan">Сбросить</button></div></div>`;
+    if($('#returnHome')) $('#returnHome').addEventListener('change',e=>{planner.includeHomeReturn=e.target.checked;updateRouteSummary()});
     $('#navigatePlan').addEventListener('click',startNavigation);
     $('#clearPlan').addEventListener('click',()=>{planner.points=[];renderPlannerStep();refreshSuggestions()});
     updateSelected();updateRouteSummary();
   }
-  function updateSelected(){const el=$('#selectedPoints');if(!el)return;el.innerHTML=planner.points.length?planner.points.map((n,i)=>`<div class="selected-row"><span>${i+1}</span><b>${esc(n)}</b><button data-remove="${esc(n)}">×</button></div>`).join(''):'<div class="empty">Пока ни одного филиала. Нажмите «Добавить».</div>';$$('[data-remove]').forEach(b=>b.addEventListener('click',()=>{planner.points=planner.points.filter(x=>x!==b.dataset.remove);updateSelected();updateRouteSummary();refreshSuggestions()}));}
+  function updateSelected(){
+    const el=$('#selectedPoints');if(!el)return;
+    el.innerHTML=planner.points.length?planner.points.map((n,i)=>`<div class="selected-row"><span>${i+1}</span><b>${esc(n)}</b><button data-remove="${esc(n)}">×</button></div>`).join(''):'<div class="empty">Пока ни одного филиала. Нажмите «Добавить».</div>';
+    const count=$('#routeCount');if(count)count.textContent=`${planner.points.length}/4`;
+    const hint=$('#routeHint');if(hint)hint.textContent=planner.points.length?'точки выбраны':'можно ограничиться одной';
+    const nav=$('#navigatePlan');if(nav)nav.disabled=planner.points.length===0;
+    $$('[data-remove]').forEach(b=>b.addEventListener('click',()=>{planner.points=planner.points.filter(x=>x!==b.dataset.remove);updateSelected();updateRouteSummary();refreshSuggestions()}));
+  }
   async function refreshSuggestions(){
-    const el=$('#suggestions');if(!el||!planner.origin)return;el.innerHTML='<div class="loading">Рассчитываем реальные дорожные расстояния…</div>';
+    const el=$('#suggestions');if(!el||!planner.origin)return;
+    const fromHome=planner.origin.name==='Дом';
+    if(fromHome){
+      const excluded=new Set([planner.origin.name,...planner.points]);
+      const all=allBranches().filter(b=>!excluded.has(b.name));
+      planner.suggestions=all;
+      el.innerHTML=all.length?all.map((b,i)=>{const visited=visits().some(v=>v.branch===b.name&&v.status!=='Отменено');return `<article class="suggestion"><div class="rank">${i+1}</div><div class="suggestion-main"><b>${esc(b.name)}</b><span>${b.region?esc(b.region):''}${visited?' · уже посещён':''}</span><small>📍 ${Number(b.lat).toFixed(6)}, ${Number(b.lon).toFixed(6)}</small></div><button class="add" data-add="${esc(b.name)}" ${planner.points.length>=4?'disabled':''}>Добавить</button></article>`}).join(''):'<div class="empty">Нет доступных филиалов.</div>';
+      bindSuggestionButtons();
+      return;
+    }
+    el.innerHTML='<div class="loading">Рассчитываем реальные дорожные расстояния…</div>';
     const base=lastPoint()||planner.origin;const excluded=new Set([planner.origin.name,...planner.points]);let pool=pendingBranches().filter(b=>!excluded.has(b.name));
-    // Straight-line prefilter keeps the OSRM requests practical. Suggestions are calculated from the last selected point.
     pool.sort((a,b)=>hav(base,a)-hav(base,b));pool=pool.slice(0,14);
     const results=[];for(const b of pool){const d=await osrmDistance(base,b);results.push({...b,...d});}
     if(base.name!=='Дом' && !planner.points.includes('Дом')){const d=await osrmDistance(base,START_POINT);results.push({name:'Дом',region:'Точка возврата',...d,isHome:true});}
     results.sort((a,b)=>a.km-b.km);planner.suggestions=results.slice(0,8);
     if(!$('#suggestions'))return;
-    $('#suggestions').innerHTML=planner.suggestions.length?planner.suggestions.map((b,i)=>`<article class="suggestion"><div class="rank">${i+1}</div><div class="suggestion-main"><b>${esc(b.name)}</b><span>${b.region?esc(b.region):''}</span><small>🚗 ${b.km.toFixed(1)} км · ⏱ ${Math.round(b.min)} мин${b.road?'':' · ориентир'}</small></div><button class="add" data-add="${esc(b.name)}" ${b.isHome||planner.points.length>=4?'disabled':''}>${b.isHome?'Домой':'Добавить'}</button></article>`).join(''):'<div class="empty">Нет доступных филиалов.</div>';
-    $$('[data-add]').forEach(b=>b.addEventListener('click',()=>{if(planner.suggestions.find(x=>x.name===b.dataset.add)?.isHome){planner.includeHomeReturn=true;const rh=$('#returnHome');if(rh)rh.checked=true;updateRouteSummary();return;}if(planner.points.length>=4)return;planner.points.push(b.dataset.add);updateSelected();updateRouteSummary();refreshSuggestions()}));
+    el.innerHTML=planner.suggestions.length?planner.suggestions.map((b,i)=>`<article class="suggestion"><div class="rank">${i+1}</div><div class="suggestion-main"><b>${esc(b.name)}</b><span>${b.region?esc(b.region):''}</span><small>🚗 ${b.km.toFixed(1)} км · ⏱ ${Math.round(b.min)} мин${b.road?'':' · ориентир'}</small></div><button class="add" data-add="${esc(b.name)}" ${b.isHome||planner.points.length>=4?'disabled':''}>${b.isHome?'Домой':'Добавить'}</button></article>`).join(''):'<div class="empty">Нет доступных филиалов.</div>';
+    bindSuggestionButtons();
+  }
+  function bindSuggestionButtons(){
+    $$('[data-add]').forEach(b=>b.addEventListener('click',()=>{
+      const item=planner.suggestions.find(x=>x.name===b.dataset.add);
+      if(item?.isHome){planner.includeHomeReturn=true;const rh=$('#returnHome');if(rh)rh.checked=true;updateRouteSummary();return;}
+      if(planner.points.length>=4)return;
+      planner.points.push(b.dataset.add);
+      updateSelected();updateRouteSummary();refreshSuggestions();
+    }));
   }
   async function updateRouteSummary(){const el=$('#routeSummary');if(!el||!planner.origin)return;const pts=routePoints();el.innerHTML='<span>Считаем маршрут…</span>';const d=await osrmRoute(pts);if($('#routeSummary'))$('#routeSummary').innerHTML=`<b>${d.km.toFixed(1)} км</b><span>⏱ ${Math.round(d.min)} мин · ${d.road?'по дорогам':'ориентировочно'}</span>`;}
 
@@ -160,7 +187,7 @@
   }
   function branchDetail(name){
     const b=branchByName(name),c=COORDS[name]||[],v=visits().find(x=>x.branch===name);
-    showModal(`<div class="branch-modal-title"><div class="eyebrow">${esc(b.region||'Филиал')}</div><h2>${esc(name)}</h2><div class="coords">📍 ${c.length?c[0].toFixed(6)+', '+c[1].toFixed(6):'—'}</div></div><div class="branch-person"><div class="person-icon">👨‍💼</div><div><b>${esc(b.staff||'Не указан')}</b><span>Бош муҳандис / Ответственный</span><div class="branch-phone">📞 ${esc(b.staffPhone||'—')}</div></div></div><div class="branch-person"><div class="person-icon">💼</div><div><b>${esc(b.head||'Не указан')}</b><span>Филиал бошлиғи / Руководитель</span><div class="branch-phone">📞 ${esc(b.phone||'—')}</div></div></div><div class="detail-extra"><div><span>Адрес</span><b>${esc(b.address||'—')}</b></div><div><span>Email</span><b>${esc(b.email||'—')}</b></div><div><span>Последнее посещение</span><b>${v?dateFmt(v.date):'Не посещён'}</b></div></div><div class="branch-modal-actions"><button class="primary" id="branchNav">🧭 Навигация</button><button class="ghost" id="visitNow">✓ Посетить</button></div><div class="modal-actions"><button class="ghost" data-close>Закрыть</button></div>`);
+    showModal(`<div class="branch-modal-title"><div class="eyebrow">${esc(b.region||'Филиал')}</div><h2>${esc(name)}</h2><div class="coords">📍 ${c.length?c[0].toFixed(6)+', '+c[1].toFixed(6):'—'}</div></div><div class="branch-person"><div class="person-icon">👨‍💼</div><div><b>${esc(b.staff||'Не указан')}</b><span>Бош муҳандис / Ответственный</span><a class="branch-phone" href="tel:${esc(b.staffPhone||'')}">📞 ${esc(b.staffPhone||'—')}</a></div></div><div class="branch-person"><div class="person-icon">💼</div><div><b>${esc(b.head||'Не указан')}</b><span>Филиал бошлиғи / Руководитель</span><a class="branch-phone" href="tel:${esc(b.phone||'')}">📞 ${esc(b.phone||'—')}</a></div></div><div class="detail-extra"><div><span>Адрес</span><b>${esc(b.address||'—')}</b></div><div><span>Email</span><b>${esc(b.email||'—')}</b></div><div><span>Последнее посещение</span><b>${v?dateFmt(v.date):'Не посещён'}</b></div></div><div class="branch-modal-actions"><button class="primary" id="branchNav">🧭 Навигация</button><button class="ghost" id="visitNow">✓ Посетить</button></div><div class="modal-actions"><button class="ghost" data-close>Закрыть</button></div>`);
     $('#branchNav').onclick=()=>{closeModal();singleNav(name)};
     $('#visitNow').onclick=()=>{saveVisit({branch:name,status:'Посещено',notes:'Отмечено вручную',date:new Date().toISOString()});closeModal();render()};
   }
