@@ -119,8 +119,9 @@
   function renderPlannerStep(){
     const o=planner.origin;if(!o)return;
     const fromHome=o.name==='Дом';
-    $('#plannerStep').innerHTML=`<div class="origin-picked"><span>Старт</span><b>${esc(o.name)}</b></div><div id="routeSummary" class="route-summary"><span>Подсчитываем...</span></div>${fromHome?'':`<div class="field"><label>Возврат домой <input id="returnHome" type="checkbox" ${planner.includeHomeReturn?'checked':''}> <span class="switch-text">добавить Дом в конец маршрута</span></label></div>`}<div class="section-head compact"><h3>${fromHome?'Все филиалы':'Ближайшие филиалы'}</h3><small>${fromHome?'Выберите до 4 филиалов':'По дороге от выбранной точки'}</small></div><div id="suggestions" class="suggestions"><div class="loading">${fromHome?'Загружаем список филиалов…':'Рассчитываем расстояние и время…'}</div></div><div class="selected-box"><div class="section-head compact"><h3>Маршрут <span id="routeCount">${planner.points.length}/4</span></h3><small id="routeHint">${planner.points.length?'точки выбраны':'можно ограничиться одной'}</small></div><div id="selectedPoints"></div><div class="planner-actions"><button class="primary" id="navigatePlan" ${planner.points.length?'':'disabled'}>🧭 Навигация</button><button class="ghost" id="clearPlan">Сбросить</button></div></div>`;
+    $('#plannerStep').innerHTML=`<div class="origin-picked"><span>Старт</span><b>${esc(o.name)}</b></div><div id="routeSummary" class="route-summary"><span>Подсчитываем...</span></div><div class="field"><label>Возврат домой <input id="returnHome" type="checkbox" ${planner.includeHomeReturn?'checked':''}> <span class="switch-text">${fromHome?'вернуться домой после последнего филиала':'добавить Дом в конец маршрута'}</span></label></div><div class="field"><input id="plannerSearch" class="search" placeholder="🔎 Поиск филиала…" autocomplete="off"></div><div class="section-head compact"><h3>Ближайшие филиалы</h3><small>${fromHome?'От Дома · сортировка по расстоянию':'От текущей точки · по дороге'}</small></div><div id="suggestions" class="suggestions"><div class="loading">Рассчитываем расстояние и время…</div></div><div class="selected-box"><div class="section-head compact"><h3>Маршрут <span id="routeCount">${planner.points.length}/4</span></h3><small id="routeHint">${planner.points.length?'точки выбраны':'можно ограничиться одной'}</small></div><div id="selectedPoints"></div><div class="planner-actions"><button class="primary" id="navigatePlan" ${planner.points.length?'':'disabled'}>🧭 Навигация</button><button class="ghost" id="clearPlan">Сбросить</button></div></div>`;
     if($('#returnHome')) $('#returnHome').addEventListener('change',e=>{planner.includeHomeReturn=e.target.checked;updateRouteSummary()});
+    $('#plannerSearch')?.addEventListener('input',()=>renderSuggestionList());
     $('#navigatePlan').addEventListener('click',startNavigation);
     $('#clearPlan').addEventListener('click',()=>{planner.points=[];renderPlannerStep();refreshSuggestions()});
     updateSelected();updateRouteSummary();
@@ -135,23 +136,27 @@
   }
   async function refreshSuggestions(){
     const el=$('#suggestions');if(!el||!planner.origin)return;
-    const fromHome=planner.origin.name==='Дом';
-    if(fromHome){
-      const excluded=new Set([planner.origin.name,...planner.points]);
-      const all=allBranches().filter(b=>!excluded.has(b.name));
-      planner.suggestions=all;
-      el.innerHTML=all.length?all.map((b,i)=>{const visited=visits().some(v=>v.branch===b.name&&v.status!=='Отменено');return `<article class="suggestion"><div class="rank">${i+1}</div><div class="suggestion-main"><b>${esc(b.name)}</b><span>${b.region?esc(b.region):''}${visited?' · уже посещён':''}</span><small>📍 ${Number(b.lat).toFixed(6)}, ${Number(b.lon).toFixed(6)}</small></div><button class="add" data-add="${esc(b.name)}" ${planner.points.length>=4?'disabled':''}>Добавить</button></article>`}).join(''):'<div class="empty">Нет доступных филиалов.</div>';
-      bindSuggestionButtons();
-      return;
+    const base=lastPoint()||planner.origin;
+    el.innerHTML='<div class="loading">Рассчитываем ближайшие филиалы…</div>';
+    const excluded=new Set([planner.origin.name,...planner.points]);
+    const all=pendingBranches().filter(b=>!excluded.has(b.name));
+    all.sort((a,b)=>hav(base,a)-hav(base,b));
+    // Keep every branch searchable, while calculating exact road distance for the nearest candidates.
+    const results=all.map(b=>({...b,km:hav(base,b)*1.18,min:hav(base,b)*1.18/45*60,road:false}));
+    for(const b of all.slice(0,14)){
+      const d=await osrmDistance(base,b);
+      const i=results.findIndex(x=>x.name===b.name);
+      if(i>=0)results[i]={...results[i],...d};
     }
-    el.innerHTML='<div class="loading">Рассчитываем реальные дорожные расстояния…</div>';
-    const base=lastPoint()||planner.origin;const excluded=new Set([planner.origin.name,...planner.points]);let pool=pendingBranches().filter(b=>!excluded.has(b.name));
-    pool.sort((a,b)=>hav(base,a)-hav(base,b));pool=pool.slice(0,14);
-    const results=[];for(const b of pool){const d=await osrmDistance(base,b);results.push({...b,...d});}
-    if(base.name!=='Дом' && !planner.points.includes('Дом')){const d=await osrmDistance(base,START_POINT);results.push({name:'Дом',region:'Точка возврата',...d,isHome:true});}
-    results.sort((a,b)=>a.km-b.km);planner.suggestions=results.slice(0,8);
-    if(!$('#suggestions'))return;
-    el.innerHTML=planner.suggestions.length?planner.suggestions.map((b,i)=>`<article class="suggestion"><div class="rank">${i+1}</div><div class="suggestion-main"><b>${esc(b.name)}</b><span>${b.region?esc(b.region):''}</span><small>🚗 ${b.km.toFixed(1)} км · ⏱ ${Math.round(b.min)} мин${b.road?'':' · ориентир'}</small></div><button class="add" data-add="${esc(b.name)}" ${b.isHome||planner.points.length>=4?'disabled':''}>${b.isHome?'Домой':'Добавить'}</button></article>`).join(''):'<div class="empty">Нет доступных филиалов.</div>';
+    results.sort((a,b)=>a.km-b.km);
+    planner.suggestions=results;
+    renderSuggestionList();
+  }
+  function renderSuggestionList(){
+    const el=$('#suggestions');if(!el)return;
+    const q=($('#plannerSearch')?.value||'').trim().toLowerCase();
+    const list=planner.suggestions.filter(b=>!q||b.name.toLowerCase().includes(q)||(b.region||'').toLowerCase().includes(q));
+    el.innerHTML=list.length?list.map((b,i)=>{const visited=visits().some(v=>v.branch===b.name&&v.status!=='Отменено');return `<article class="suggestion"><div class="rank">${i+1}</div><div class="suggestion-main"><b>${esc(b.name)}</b><span>${b.region?esc(b.region):''}${visited?' · уже посещён':''}</span><small>🚗 ${b.km.toFixed(1)} км · ⏱ ${Math.round(b.min)} мин${b.road?'':' · ориентир'}</small></div><button class="add" data-add="${esc(b.name)}" ${planner.points.length>=4?'disabled':''}>Добавить</button></article>`}).join(''):'<div class="empty">Ничего не найдено.</div>';
     bindSuggestionButtons();
   }
   function bindSuggestionButtons(){

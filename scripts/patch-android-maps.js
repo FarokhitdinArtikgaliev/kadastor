@@ -46,27 +46,24 @@ public class MapsLauncherPlugin extends Plugin {
       return;
     }
     try {
-      if ("ru.yandex.yandexnavi".equals(packageName)) {
-        android.content.Intent legacy = new android.content.Intent("ru.yandex.yandexnavi.action.BUILD_ROUTE_ON_MAP");
-        legacy.setPackage(packageName);
-        android.net.Uri parsed = android.net.Uri.parse(url);
-        String v = parsed.getQueryParameter("lat_from"); if (v != null) legacy.putExtra("lat_from", Double.parseDouble(v));
-        v = parsed.getQueryParameter("lon_from"); if (v != null) legacy.putExtra("lon_from", Double.parseDouble(v));
-        v = parsed.getQueryParameter("lat_to"); if (v != null) legacy.putExtra("lat_to", Double.parseDouble(v));
-        v = parsed.getQueryParameter("lon_to"); if (v != null) legacy.putExtra("lon_to", Double.parseDouble(v));
-        if (getActivity().getPackageManager().queryIntentActivities(legacy, 0).size() > 0) { getActivity().startActivity(legacy); JSObject out = new JSObject(); out.put("opened", true); call.resolve(out); return; }
-      }
       Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
       if (packageName != null && !packageName.isEmpty()) intent.setPackage(packageName);
+      if (intent.resolveActivity(getActivity().getPackageManager()) == null) {
+        throw new ActivityNotFoundException("Приложение навигации не найдено");
+      }
       getActivity().startActivity(intent);
-      JSObject out = new JSObject(); out.put("opened", true); call.resolve(out);
+      JSObject out = new JSObject();
+      out.put("opened", true);
+      call.resolve(out);
     } catch (ActivityNotFoundException e) {
-      // Selected navigation app is not installed: fall back to a normal web URL.
       try {
         String fallback = (fallbackUrl != null && !fallbackUrl.isEmpty()) ? fallbackUrl : url;
         Intent browser = new Intent(Intent.ACTION_VIEW, Uri.parse(fallback));
         getActivity().startActivity(browser);
-        call.resolve(new JSObject());
+        JSObject out = new JSObject();
+        out.put("opened", false);
+        out.put("fallback", true);
+        call.resolve(out);
       } catch (Exception ex) {
         call.reject("Не удалось открыть приложение навигации", ex);
       }
