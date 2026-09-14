@@ -89,7 +89,7 @@
 
   function renderHome(){
     const s=settings(), ts=trips(), vs=visits(), rs=refuels();
-    const km=ts.reduce((a,t)=>a+Number(t.km||0),0), compensation=km*s.rate, fuelSpent=rs.reduce((a,r)=>a+Number(r.total||0),0), estimated=km/100*s.consumption*s.fuelPrice;
+    const km=ts.reduce((a,t)=>a+Number(t.km||0),0)+visits().filter(v=>v.source==='manual').reduce((a,v)=>a+Number(v.km||0),0), compensation=km*s.rate, fuelSpent=rs.reduce((a,r)=>a+Number(r.total||0),0), estimated=km/100*s.consumption*s.fuelPrice;
     const net=compensation-fuelSpent;
     $('#screen').innerHTML=`<section class="page home"><div class="hero"><div><div class="eyebrow">Полевой помощник</div><h1>Ваш рабочий маршрут</h1><p>Выбирайте точку, стройте маршрут до 4 филиалов и ведите фактический пробег.</p></div><div class="hero-mark">⌖</div></div>
       <div class="stats"><div><span>Пробег</span><b>${num(km)} км</b><small>по дорожному маршруту</small></div><div><span>Заправки</span><b>${money(fuelSpent)}</b><small>${rs.length} записей</small></div><div><span>Компенсация</span><b>${money(compensation)}</b><small>${s.rate.toLocaleString('ru-RU')} сум/км</small></div><div><span>Чистыми</span><b>${money(net)}</b><small>компенсация − заправки</small></div></div>
@@ -99,9 +99,19 @@
       </section>`;
     $('#startWork')?.addEventListener('click',openPlanner);
     $('#finishWork')?.addEventListener('click',finishTrip);
+    $('#resumeNavigation')?.addEventListener('click',resumeActiveNavigation);
+    $('#homeNavigation')?.addEventListener('click',resumeActiveNavigation);
+    $('#activeVisit')?.addEventListener('click',()=>{
+      const done=activeTrip?.completed||[], next=(activeTrip?.points||[]).find(n=>!done.includes(n));
+      if(next) openActiveVisitForm(next);
+    });
 
   }
-  function activeTripCard(){return `<div class="active-card"><div><div class="eyebrow">Активная поездка</div><h2>${esc(activeTrip.points?.join(' → ')||'Маршрут')}</h2><p>Расчётный дорожный пробег · ${num(activeTrip.km)} км${activeTrip.plannedMin?` · ${activeTrip.plannedMin} мин`:''}</p></div><div class="actions"><button class="danger" id="finishWork">Завершить</button></div></div>`}
+  function activeTripCard(){
+    const done=activeTrip.completed||[], remaining=(activeTrip.points||[]).filter(n=>!done.includes(n));
+    const next=remaining[0];
+    return `<div class="active-card"><div><div class="eyebrow">Активная поездка</div><h2>${esc(activeTrip.points?.join(' → ')||'Маршрут')}</h2><p>Расчётный дорожный пробег · ${num(activeTrip.km)} км${activeTrip.plannedMin?` · ${activeTrip.plannedMin} мин`:''}</p><p><b>Посещено: ${done.length}/${(activeTrip.points||[]).length}</b>${next?` · следующий: ${esc(next)}`:' · все филиалы отмечены'}</p></div><div class="actions"><button class="primary" id="resumeNavigation">🧭 ${next?'Продолжить навигацию':'Вернуться к навигатору'}</button>${next?`<button class="ghost" id="activeVisit">✓ Отчёт о посещении</button>`:''}${!next&&activeTrip.includeHomeReturn?`<button class="ghost" id="homeNavigation">⌂ Вернуться домой</button>`:''}<button class="danger" id="finishWork">Завершить</button></div></div>`
+  }
 
   function openPlanner(){
     planner={origin:null,points:[],suggestions:[],busy:false,includeHomeReturn:true};
@@ -176,7 +186,7 @@
     const btn=$('#navigatePlan');
     if(btn){btn.disabled=true;btn.textContent='⏳ Считаем маршрут…';}
     const d=await osrmRoute(pts);
-    const trip={id:crypto.randomUUID?.()||String(Date.now()),startedAt:new Date().toISOString(),points:planner.points.slice(),origin:planner.origin.name,includeHomeReturn:planner.includeHomeReturn,km:Number(d.km.toFixed(1)),plannedMin:Math.round(d.min),samples:0,calculation:'Дорожный маршрут'};
+    const trip={id:crypto.randomUUID?.()||String(Date.now()),startedAt:new Date().toISOString(),points:planner.points.slice(),origin:planner.origin.name,includeHomeReturn:planner.includeHomeReturn,km:Number(d.km.toFixed(1)),plannedMin:Math.round(d.min),samples:0,calculation:'Дорожный маршрут',completed:[],currentFrom:planner.origin.name};
     activeTrip=trip;
     save('activeTrip',trip);
     // No GPS is required: the trip mileage is the road distance of the selected route.
@@ -186,7 +196,32 @@
     if(!opened)alert(`Не удалось открыть ${settings().navigation==='google'?'Google Maps':'Яндекс.Навигатор'}. Проверьте, что приложение установлено.`);
   }
 
-  function getGeo(){return null}
+  async function resumeActiveNavigation(){
+    if(!activeTrip)return;
+    const done=activeTrip.completed||[];
+    const remaining=(activeTrip.points||[]).filter(n=>!done.includes(n));
+    let pts=[];
+    const fromName=done.length?done[done.length-1]:activeTrip.origin;
+    const from=fromName==='Дом'?{name:'Дом',...START_POINT}:branchByName(fromName);
+    if(remaining.length){
+      pts=[from,...remaining.map(branchByName)];
+    }else if(activeTrip.includeHomeReturn && fromName!=='Дом'){
+      pts=[from,{name:'Дом',...START_POINT}];
+    }else{
+      alert('Все точки маршрута уже отмечены.');
+      return;
+    }
+    const opened=await openNavigation(pts);
+    if(!opened)alert(`Не удалось открыть ${settings().navigation==='google'?'Google Maps':'Яндекс.Навигатор'}. Проверьте, что приложение установлено.`);
+  }
+
+  function openActiveVisitForm(branch){
+    const done=activeTrip?.completed||[];
+    const from=done.length?done[done.length-1]:activeTrip?.origin||'Дом';
+    openVisitForm(null,branch,from,true);
+  }
+
+    function getGeo(){return null}
   function startGps(){}
   function stopGps(){}
   function handleGps(){}
@@ -225,17 +260,58 @@
   }
 
   function renderReports(){
-    const vs=visits().sort((a,b)=>new Date(b.date)-new Date(a.date)),ts=trips(),unique=new Set(vs.map(v=>v.branch));
-    const repeat=vs.filter(v=>v.status==='Нужно повторно').length, problems=vs.filter(v=>v.status==='Проблема').length, km=ts.reduce((a,t)=>a+Number(t.km||0),0),period=load('reportPeriod','all'),filtered=filterReports(vs,period);
-    const rows=filtered.map(v=>`<article class="report-row"><div><b>${esc(v.branch)}</b><span class="status-${esc(v.status).replace(/ /g,'-')}">${esc(v.status)}</span><small>${dateFmt(v.date)}</small>${v.notes?`<p>${esc(v.notes)}</p>`:''}</div><button class="ghost small" data-editvisit="${esc(v.id||v.date)}">Изменить</button></article>`).join('');
-    $('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Журнал работы</div><h1>Отчёты</h1><p>Посещения, результаты и история поездок.</p></div><button class="primary small" id="addVisit">+ Посещение</button></div><div class="report-summary"><div><b>${unique.size}</b><span>филиалов посещено</span></div><div><b>${Math.max(0,47-unique.size)}</b><span>осталось</span></div><div><b>${repeat}</b><span>повторных</span></div><div><b>${problems}</b><span>проблем</span></div><div><b>${num(km)} км</b><span>в поездках</span></div></div><div class="periods"><button class="period ${period==='all'?'active':''}" data-period="all">Все</button><button class="period ${period==='today'?'active':''}" data-period="today">Сегодня</button><button class="period ${period==='week'?'active':''}" data-period="week">7 дней</button><button class="period ${period==='month'?'active':''}" data-period="month">Месяц</button></div><div class="section-head compact"><h2>Посещения</h2><span>${filtered.length}</span></div><div id="reportList" class="report-list">${rows||'<div class="empty">Посещений за выбранный период нет.</div>'}</div><div class="card"><div class="section-head"><h2>История поездок</h2><span>${ts.length}</span></div>${ts.slice(0,30).map(t=>`<div class="trip-row"><div><b>${num(t.km)} км</b><span>${esc((t.points||[]).join(' → '))}</span><small>${dateFmt(t.date)} · посещено ${(t.visited||[]).length}/${(t.points||[]).length}</small></div><strong>${money(Number(t.km||0)*settings().rate)}</strong></div>`).join('')||'<div class="empty">Поездок пока нет.</div>'}</div></section>`;
+    const allVs=visits().sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const ts=trips();
+    const unique=new Set(allVs.map(v=>v.branch).filter(Boolean));
+    const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    const period=load('reportPeriod','all');
+    const filtered=allVs.filter(v=>{const d=new Date(v.date);if(period==='today')return d>=today;if(period==='week')return d>=new Date(today.getTime()-6*86400000);if(period==='month')return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();return true});
+    const repeat=allVs.filter(v=>v.status==='Нужно повторно').length,problems=allVs.filter(v=>v.status==='Проблема').length;
+    const tripKm=ts.reduce((a,t)=>a+Number(t.km||0),0),manualKm=allVs.filter(v=>v.source==='manual').reduce((a,v)=>a+Number(v.km||0),0),km=tripKm+manualKm;
+    const rows=filtered.map(v=>`<article class="report-row"><div><b>${esc(v.branch)}</b><span class="status-${esc(v.status).replace(/ /g,'-')}">${esc(v.status)}</span><small>${dateFmt(v.date)}${v.from?` · ${esc(v.from)} → ${esc(v.branch)}`:''}${v.km?` · 🚗 ${num(v.km)} км`:''}</small>${v.notes?`<p>${esc(v.notes)}</p>`:''}</div><button class="ghost small" data-editvisit="${esc(v.id||v.date)}">Изменить</button></article>`).join('');
+    $('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Журнал работы</div><h1>Отчёты</h1><p>Посещения, результаты и история поездок.</p></div><button class="primary small" id="addVisit">+ Посещение</button></div><div class="report-summary"><div><b>${unique.size}</b><span>филиалов посещено</span></div><div><b>${Math.max(0,47-unique.size)}</b><span>осталось</span></div><div><b>${repeat}</b><span>повторных</span></div><div><b>${problems}</b><span>проблем</span></div><div><b>${num(km)} км</b><span>общий километраж</span></div></div><div class="periods"><button class="period ${period==='all'?'active':''}" data-period="all">Все</button><button class="period ${period==='today'?'active':''}" data-period="today">Сегодня</button><button class="period ${period==='week'?'active':''}" data-period="week">7 дней</button><button class="period ${period==='month'?'active':''}" data-period="month">Месяц</button></div><div class="section-head compact"><h2>Посещения</h2><span>${filtered.length}</span></div><div id="reportList" class="report-list">${rows||'<div class="empty">Посещений за выбранный период нет.</div>'}</div><div class="card"><div class="section-head"><h2>История поездок</h2><span>${ts.length}</span></div>${ts.slice(0,30).map(t=>`<div class="trip-row"><div><b>${num(t.km)} км</b><span>${esc((t.points||[]).join(' → '))}</span><small>${dateFmt(t.date)} · посещено ${(t.visited||[]).length}/${(t.points||[]).length}</small></div><strong>${money(Number(t.km||0)*settings().rate)}</strong></div>`).join('')||'<div class="empty">Поездок пока нет.</div>'}</div></section>`;
     $('#addVisit').onclick=()=>openVisitForm();$$('[data-editvisit]').forEach(b=>b.onclick=()=>{const item=visits().find(v=>(v.id||v.date)===b.dataset.editvisit);if(item)openVisitForm(item)});$$('.period').forEach(b=>b.onclick=()=>{save('reportPeriod',b.dataset.period);renderReports()});
   }
-  function filterReports(arr,period){const now=new Date();if(period==='today')return arr.filter(v=>new Date(v.date).toDateString()===now.toDateString());if(period==='week'){const d=new Date(now);d.setDate(now.getDate()-6);return arr.filter(v=>new Date(v.date)>=d)}if(period==='month')return arr.filter(v=>new Date(v.date).getMonth()===now.getMonth()&&new Date(v.date).getFullYear()===now.getFullYear());return arr}
-  function openVisitForm(existing,preselectedBranch){const opts=allBranches().map(b=>`<option ${existing?.branch===b.name||(!existing&&preselectedBranch===b.name)?'selected':''}>${esc(b.name)}</option>`).join('');showModal(`<h2>${existing?'Изменить':'Новое'} посещение</h2><form id="visitForm"><label class="field">Филиал<select name="branch">${opts}</select></label><label class="field">Статус<select name="status"><option ${!existing||existing.status==='Посещено'?'selected':''}>Посещено</option><option ${existing?.status==='Частично выполнено'?'selected':''}>Частично выполнено</option><option ${existing?.status==='Нужно повторно'?'selected':''}>Нужно повторно</option><option ${existing?.status==='Проблема'?'selected':''}>Проблема</option></select></label><label class="field">Результат визита<textarea name="notes" placeholder="Что сделано, какие вопросы решены, что осталось…">${esc(existing?.notes||'')}</textarea></label><div class="modal-actions"><button type="button" class="ghost" data-close>Отмена</button><button class="primary">Сохранить</button></div></form>`);$('#visitForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target),item={id:existing?.id||crypto.randomUUID?.()||String(Date.now()),branch:f.get('branch'),status:f.get('status'),notes:(f.get('notes')||'').trim(),date:existing?.date||new Date().toISOString()};const arr=visits(),i=arr.findIndex(v=>v.id===item.id);if(i>=0)arr[i]=item;else arr.unshift(item);save('visits',arr.slice(0,2000));closeModal();render()}}
+
+  async function openVisitForm(existing,preselectedBranch,preselectedFrom,activeMode=false){
+    const branches=allBranches();
+    const branchOpts=branches.map(b=>`<option ${existing?.branch===b.name||(!existing&&preselectedBranch===b.name)?'selected':''}>${esc(b.name)}</option>`).join('');
+    const selectedFrom=existing?.from||preselectedFrom||'Дом';
+    const fromOpts=[`<option value="Дом" ${selectedFrom==='Дом'?'selected':''}>Дом</option>`,...branches.map(b=>`<option ${selectedFrom===b.name?'selected':''}>${esc(b.name)}</option>`)].join('');
+    const dt=existing?.date?new Date(existing.date):new Date();
+    const local=new Date(dt.getTime()-dt.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    showModal(`<h2>${activeMode?'Отчёт о посещении':(existing?'Изменить':'Добавить')+' посещение'}</h2><p class="muted">${activeMode?'Зафиксируйте, что сделали в филиале. После сохранения можно сразу продолжить путь к следующему филиалу.':'Если поездка была забыта, укажите откуда ехали, какой филиал посетили, дату и результат. Километраж будет добавлен в общий пробег.'}</p><form id="visitForm"><input type="hidden" name="activeFrom" value="${esc(selectedFrom)}"><input type="hidden" name="activeBranch" value="${esc(preselectedBranch||existing?.branch||'')}"><label class="field">Откуда<select name="from" ${activeMode?'disabled':''}>${fromOpts}</select></label><label class="field">Куда / филиал<select name="branch" ${activeMode?'disabled':''}>${branchOpts}</select></label><label class="field">Когда<input name="date" type="datetime-local" value="${local}" required></label><label class="field">Статус<select name="status"><option ${!existing||existing.status==='Посещено'?'selected':''}>Посещено</option><option ${existing?.status==='Частично выполнено'?'selected':''}>Частично выполнено</option><option ${existing?.status==='Нужно повторно'?'selected':''}>Нужно повторно</option><option ${existing?.status==='Проблема'?'selected':''}>Проблема</option></select></label><label class="field">Что делал / результат<textarea name="notes" placeholder="Например: передал документы, проверил оборудование, решил вопрос…">${esc(existing?.notes||'')}</textarea></label><div id="visitDistance" class="route-summary"><span>🚗 Километраж будет рассчитан по дороге</span></div><div class="modal-actions"><button type="button" class="ghost" data-close>Отмена</button><button class="primary" id="saveManualVisit">${activeMode?'Сохранить':' '+(existing?'Сохранить изменения':'Добавить посещение')}</button>${activeMode?'<button type="button" class="ghost" id="saveAndContinue">Сохранить и продолжить путь</button>':''}</div></form>`);
+    const form=$('#visitForm'),distEl=$('#visitDistance');
+    async function recalc(){
+      const from=form.elements.from.value,branch=form.elements.branch.value;if(!from||!branch||from===branch){distEl.innerHTML='<span>🚗 Укажите разные точки для расчёта километража</span>';return null;}
+      const a=from==='Дом'?START_POINT:{lat:COORDS[from]?.[0],lon:COORDS[from]?.[1],label:from},b={lat:COORDS[branch]?.[0],lon:COORDS[branch]?.[1],label:branch};
+      if(!a.lat||!b.lat){distEl.innerHTML='<span>🚗 Координаты недоступны</span>';return null;}
+      distEl.innerHTML='<span>🚗 Рассчитываем дорожный пробег…</span>';
+      const d=await osrmRoute([a,b]);
+      if(!d){distEl.innerHTML='<span>⚠️ Не удалось рассчитать маршрут</span>';return null;}
+      distEl.innerHTML=`<b>${num(d.km)} км</b><span> · ⏱ ${Math.round(d.min)} мин · будет добавлено в общий километраж</span>`;return d.km;
+    }
+    form.elements.from.onchange=recalc;form.elements.branch.onchange=recalc;recalc();
+    async function saveForm(continueAfter){
+      const btn=$('#saveManualVisit');if(btn)btn.disabled=true;
+      const km=await recalc();if(km==null){if(btn)btn.disabled=false;return;}
+      const f=new FormData(form),branch=activeMode?f.get('activeBranch'):f.get('branch'),from=activeMode?f.get('activeFrom'):f.get('from');
+      const item={id:existing?.id||crypto.randomUUID?.()||String(Date.now()),branch,from,status:f.get('status'),notes:(f.get('notes')||'').trim(),date:new Date(f.get('date')).toISOString(),km:Number(km.toFixed(1)),source:activeMode?'trip':'manual',tripId:activeMode?activeTrip?.id:undefined};
+      const arr=visits(),i=arr.findIndex(v=>v.id===item.id);if(i>=0)arr[i]=item;else arr.unshift(item);save('visits',arr.slice(0,2000));
+      if(activeMode&&activeTrip){
+        const completed=[...(activeTrip.completed||[])];if(!completed.includes(branch))completed.push(branch);
+        activeTrip={...activeTrip,completed,currentFrom:branch};save('activeTrip',activeTrip);
+      }
+      closeModal();render();
+      if(activeMode&&continueAfter) setTimeout(resumeActiveNavigation,120);
+    }
+    form.onsubmit=e=>{e.preventDefault();saveForm(false)};
+    $('#saveAndContinue')?.addEventListener('click',()=>saveForm(true));
+  }
+
   function saveVisit(v){const arr=visits();arr.unshift({...v,id:v.id||crypto.randomUUID?.()||String(Date.now())});save('visits',arr.slice(0,1000));}
 
-  function renderFinance(){const s=settings(),km=trips().reduce((a,t)=>a+Number(t.km||0),0),comp=km*s.rate,rf=refuels(),fuel=rf.reduce((a,r)=>a+Number(r.total||0),0),exp=expenses(),other=exp.reduce((a,r)=>a+Number(r.amount||0),0);$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Доходы и расходы</div><h1>Финансы</h1><p>Заправки и расчёт компенсации по маршрутам.</p></div></div><div class="finance-total"><span>Расчётный результат</span><b>${money(comp-fuel-other)}</b><small>${num(km)} км × ${s.rate.toLocaleString('ru-RU')} − ${money(fuel)} заправки − ${money(other)} прочее</small></div><div class="finance-actions"><button class="primary" id="addFuel">+ Заправка</button><button class="ghost" id="addExpense">+ Расход</button></div><div class="card"><div class="section-head"><h2>Заправки</h2><b>${money(fuel)}</b></div>${rf.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.fuel)}</b><span>${num(r.amount ?? r.liters)} ${r.unit || (r.fuel==='Метан'?'м³':'л')} · ${dateFmt(r.date)}</span></div><strong>${money(r.total)}</strong></div>`).join('')||'<div class="empty">Заправок пока нет.</div>'}</div><div class="card"><div class="section-head"><h2>Прочие расходы</h2><b>${money(other)}</b></div>${exp.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.title)}</b><span>${dateFmt(r.date)}</span></div><strong>${money(r.amount)}</strong></div>`).join('')||'<div class="empty">Других расходов нет.</div>'}</div></section>`;$('#addFuel').onclick=openFuel;$('#addExpense').onclick=openExpense;}
+  function renderFinance(){const s=settings(),km=trips().reduce((a,t)=>a+Number(t.km||0),0)+visits().filter(v=>v.source==='manual').reduce((a,v)=>a+Number(v.km||0),0),comp=km*s.rate,rf=refuels(),fuel=rf.reduce((a,r)=>a+Number(r.total||0),0),exp=expenses(),other=exp.reduce((a,r)=>a+Number(r.amount||0),0);$('#screen').innerHTML=`<section class="page"><div class="page-title"><div><div class="eyebrow">Доходы и расходы</div><h1>Финансы</h1><p>Заправки и расчёт компенсации по маршрутам.</p></div></div><div class="finance-total"><span>Расчётный результат</span><b>${money(comp-fuel-other)}</b><small>${num(km)} км × ${s.rate.toLocaleString('ru-RU')} − ${money(fuel)} заправки − ${money(other)} прочее</small></div><div class="finance-actions"><button class="primary" id="addFuel">+ Заправка</button><button class="ghost" id="addExpense">+ Расход</button></div><div class="card"><div class="section-head"><h2>Заправки</h2><b>${money(fuel)}</b></div>${rf.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.fuel)}</b><span>${num(r.amount ?? r.liters)} ${r.unit || (r.fuel==='Метан'?'м³':'л')} · ${dateFmt(r.date)}</span></div><strong>${money(r.total)}</strong></div>`).join('')||'<div class="empty">Заправок пока нет.</div>'}</div><div class="card"><div class="section-head"><h2>Прочие расходы</h2><b>${money(other)}</b></div>${exp.slice(0,20).map(r=>`<div class="money-row"><div><b>${esc(r.title)}</b><span>${dateFmt(r.date)}</span></div><strong>${money(r.amount)}</strong></div>`).join('')||'<div class="empty">Других расходов нет.</div>'}</div></section>`;$('#addFuel').onclick=openFuel;$('#addExpense').onclick=openExpense;}
   function openFuel(){const s=settings();showModal(`<h2>Заправка</h2><form id="fuelForm"><label class="field">Топливо<select name="fuel" id="fuelFormType"><option ${s.fuel==='Бензин'?'selected':''}>Бензин</option><option ${s.fuel==='Пропан'?'selected':''}>Пропан</option><option ${s.fuel==='Метан'?'selected':''}>Метан</option></select></label><label class="field"><span id="fuelAmountLabel">${s.fuel==='Метан'?'Количество, м³':'Количество, л'}</span><input name="amount" id="fuelAmount" type="number" step="0.1" required></label><label class="field"><span id="fuelPriceLabel">${s.fuel==='Метан'?'Цена за м³':'Цена за литр'}</span><input name="price" id="fuelFormPrice" type="number" value="${s.fuelPrice}" required></label><div class="modal-actions"><button type="button" class="ghost" data-close>Отмена</button><button class="primary">Сохранить</button></div></form>`);
     const type=$('#fuelFormType'), amount=$('#fuelAmount'), price=$('#fuelFormPrice');
     const sync=()=>{const methane=type.value==='Метан';$('#fuelAmountLabel').textContent=methane?'Количество, м³':'Количество, л';$('#fuelPriceLabel').textContent=methane?'Цена за м³':'Цена за литр';if(methane&&Number(price.value)===8500)price.value=5200;if(!methane&&Number(price.value)===5200)price.value=8500};type.addEventListener('change',sync);
