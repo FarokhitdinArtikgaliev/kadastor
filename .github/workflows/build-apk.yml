@@ -1,36 +1,73 @@
 name: Build Kadastr Route APK
-on: {workflow_dispatch: {}, push: {branches: [main]}}
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
 jobs:
   build:
+    name: Build APK
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: 22
-      - uses: actions/setup-java@v5
-        with: {distribution: temurin, java-version: '21'}
-      - uses: android-actions/setup-android@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
         with:
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
           accept-android-sdk-licenses: true
+
+      - name: Install required Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -u+x | sort -V | tail -n 1)"
+          fi
+
+          echo "Using sdkmanager: $SDKMANAGER"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
       - name: Install dependencies
         run: npm install
+
       - name: Add Android platform
         run: npx cap add android
+
       - name: Install native Google Maps bridge
         run: node scripts/patch-android-maps.js
+
       - name: Sync Capacitor
         run: npx cap sync android
+
       - name: Build Debug APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kadastr-Marshrut-v25.4-debug
+          name: Kadastr-Marshrut-v25.5-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
