@@ -12,59 +12,97 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Получаем исходники
       - name: Checkout
         uses: actions/checkout@v6
 
+      # 2. Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
 
+      # 3. Java
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
+      # 4. Android SDK
+      # ВАЖНО: packages: '' отключает установку
+      # устаревшего пакета "tools"
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
+          packages: ''
           accept-android-sdk-licenses: true
 
+      # 5. Устанавливаем только необходимые Android SDK пакеты
       - name: Install required Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
+
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
           if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -u+x | sort -V | tail -n 1)"
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" \
+              -type f \
+              -name sdkmanager \
+              -perm -u+x \
+              | sort -V \
+              | tail -n 1)"
           fi
 
-          echo "Using sdkmanager: $SDKMANAGER"
-          "$SDKMANAGER" --version
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager || true
+            exit 1
+          fi
 
+          echo "Using sdkmanager:"
+          echo "$SDKMANAGER"
+
+          echo "sdkmanager version:"
+          "$SDKMANAGER" --version
+
+          echo "Accepting Android SDK licenses..."
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          echo "Installing Android SDK packages..."
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      # 6. Устанавливаем npm-зависимости
       - name: Install dependencies
         run: npm install
 
+      # 7. Добавляем Android-платформу Capacitor
       - name: Add Android platform
         run: npx cap add android
 
+      # 8. Устанавливаем native Google Maps bridge
       - name: Install native Google Maps bridge
         run: node scripts/patch-android-maps.js
 
+      # 9. Синхронизируем Capacitor
       - name: Sync Capacitor
         run: npx cap sync android
 
+      # 10. Собираем Debug APK
       - name: Build Debug APK
         working-directory: android
+        shell: bash
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
+      # 11. Загружаем APK как Artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
