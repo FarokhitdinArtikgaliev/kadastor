@@ -39,36 +39,26 @@ public class MapsLauncherPlugin extends Plugin {
   @PluginMethod
   public void openRoute(PluginCall call) {
     String url = call.getString("url");
-    String packageName = call.getString("packageName");
-    String fallbackUrl = call.getString("fallbackUrl");
     if (url == null || url.isEmpty()) {
       call.reject("URL маршрута не задан");
       return;
     }
+    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+    intent.setPackage("com.google.android.apps.maps");
     try {
-      Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-      if (packageName != null && !packageName.isEmpty()) intent.setPackage(packageName);
-      if (intent.resolveActivity(getActivity().getPackageManager()) == null) {
-        throw new ActivityNotFoundException("Приложение навигации не найдено");
-      }
       getActivity().startActivity(intent);
-      JSObject out = new JSObject();
-      out.put("opened", true);
-      call.resolve(out);
+      call.resolve(new JSObject());
     } catch (ActivityNotFoundException e) {
+      // Google Maps is not installed: fall back to the system browser.
       try {
-        String fallback = (fallbackUrl != null && !fallbackUrl.isEmpty()) ? fallbackUrl : url;
-        Intent browser = new Intent(Intent.ACTION_VIEW, Uri.parse(fallback));
+        Intent browser = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         getActivity().startActivity(browser);
-        JSObject out = new JSObject();
-        out.put("opened", false);
-        out.put("fallback", true);
-        call.resolve(out);
+        call.resolve(new JSObject());
       } catch (Exception ex) {
-        call.reject("Не удалось открыть приложение навигации", ex);
+        call.reject("Не удалось открыть Google Maps", ex);
       }
     } catch (Exception e) {
-      call.reject("Не удалось открыть приложение навигации", e);
+      call.reject("Не удалось открыть Google Maps", e);
     }
   }
 }
@@ -92,21 +82,14 @@ if (!patched.includes('registerPlugin(MapsLauncherPlugin.class)')) {
 }
 fs.writeFileSync(main, patched);
 
-// Android 11+ package visibility: declare that the app may interact with both navigation apps.
+// Android 11+ package visibility: declare that the app may interact with Maps.
 const manifest = path.join(android, 'app', 'src', 'main', 'AndroidManifest.xml');
 if (fs.existsSync(manifest)) {
   let m = fs.readFileSync(manifest, 'utf8');
-  if (!m.includes('com.google.android.apps.maps') || !m.includes('ru.yandex.yandexnavi')) {
-    const packages=[];
-    if(!m.includes('com.google.android.apps.maps')) packages.push('        <package android:name="com.google.android.apps.maps" />');
-    if(!m.includes('ru.yandex.yandexnavi')) packages.push('        <package android:name="ru.yandex.yandexnavi" />');
-    if(m.includes('<queries>')) {
-      m=m.replace('</queries>', packages.join('\n')+'\n    </queries>');
-    } else {
-      const q=`\n    <queries>\n${packages.join('\n')}\n    </queries>`;
-      m=m.replace(/<manifest([^>]*)>/, `<manifest$1>${q}`);
-    }
-    fs.writeFileSync(manifest,m);
+  if (!m.includes('com.google.android.apps.maps')) {
+    const q = `\n    <queries>\n        <package android:name="com.google.android.apps.maps" />\n    </queries>`;
+    m = m.replace(/<manifest([^>]*)>/, `<manifest$1>${q}`);
+    fs.writeFileSync(manifest, m);
   }
 }
 console.log('Maps native bridge installed:', plugin);
